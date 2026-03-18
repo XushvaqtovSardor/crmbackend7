@@ -36,6 +36,7 @@ services:
       sh -c "
         npx prisma generate &&
         npx prisma migrate deploy &&
+        pnpm run build &&
         pnpm run start:prod
       "
     environment:
