@@ -37,7 +37,7 @@ services:
         npx prisma generate &&
         npx prisma migrate deploy &&
         pnpm run build &&
-        pnpm run start:prod
+        pnpm run start:dev
       "
     environment:
       PORT: 3000
