@@ -43,9 +43,9 @@ async function resetDatabase() {
 
 async function main() {
     const [adminPassword, teacherPassword, studentPassword] = await Promise.all([
-        bcrypt.hash('admin123', 10),
-        bcrypt.hash('teacher123', 10),
-        bcrypt.hash('student123', 10),
+        bcrypt.hash('superadmin', 10),
+        bcrypt.hash('teacher', 10),
+        bcrypt.hash('student', 10),
     ]);
 
     await resetDatabase();

@@ -148,9 +148,9 @@ async function bootstrap() {
   server.headersTimeout = 66000;
   server.requestTimeout = 15000;
 
-  console.log(` Application is running on: http://localhost:${port}/api/v1`);
+  console.log(` Application is running on: http://188.166.234.88:8002/api/v1`);
   console.log(
-    `Swagger docs available at: http://localhost:${port}/api/v1/docs`,
+    `Swagger docs available at: http://188.166.234.88:8002/api/v1/docs`,
   );
 }
 void bootstrap();
