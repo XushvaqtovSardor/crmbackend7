@@ -17,4 +17,4 @@ RUN pnpm run build
 
 EXPOSE 3000
 
-CMD sh -c "npx prisma migrate deploy && node dist/src/main.js"
+CMD sh -c "npx prisma migrate deploy && pnpm run db:seed && node dist/src/main.js"
