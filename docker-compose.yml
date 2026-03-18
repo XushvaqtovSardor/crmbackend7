@@ -7,7 +7,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-erp_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_please}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-datapass}
       POSTGRES_DB: ${POSTGRES_DB:-erp_data}
     ports:
       - '127.0.0.1:${POSTGRES_PORT:-5436}:5432'
@@ -41,7 +41,7 @@ services:
       "
     environment:
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-change_me_please}@db:5432/${POSTGRES_DB:-erp_data}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-datapass}@db:5432/${POSTGRES_DB:-erp_data}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
 
