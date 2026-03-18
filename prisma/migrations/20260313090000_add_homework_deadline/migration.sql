@@ -1,0 +1,2 @@
+ALTER TABLE "Homework"
+ADD COLUMN "deadlineAt" TIMESTAMP(3);

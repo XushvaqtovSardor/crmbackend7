@@ -1,0 +1,8 @@
+ALTER TABLE "Homework"
+ADD COLUMN "maxAttempts" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN "allowLateSubmission" BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE "HomeworkResponse"
+ADD COLUMN "attemptNo" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN "feedback" TEXT,
+ADD COLUMN "reviewedAt" TIMESTAMP(3);
