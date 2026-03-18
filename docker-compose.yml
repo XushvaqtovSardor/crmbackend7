@@ -13,12 +13,14 @@ services:
       - '5436:5432'
     volumes:
       - baza_data:/var/lib/postgresql/data
+
   redis:
     image: redis:7
-    container_name: payment_redis
+    container_name: redis_erp
     restart: always
     ports:
       - '6389:6379'
+
   app:
     build: .
     container_name: erp
@@ -34,10 +36,11 @@ services:
       sh -c "
         npx prisma generate &&
         npx prisma migrate deploy &&
-        pnpm run start:dev
+        pnpm run start:prod
       "
     environment:
-      DATABASE_URL: postgres://postgres:12345@db:5432/erp_data
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:12345@db:5432/erp_data?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
 
