@@ -150,7 +150,7 @@ async function bootstrap() {
 
   console.log(` Application is running on: http://188.166.234.88:8002/api/v1`);
   console.log(
-    `Swagger docs available at: http://188.166.234.88:8002/api/v1/docs`,
+    `Swagger docs available at:  http://188.166.234.88:8002/api/v1/docs`,
   );
 }
 void bootstrap();
