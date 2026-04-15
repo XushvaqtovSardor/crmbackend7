@@ -7,6 +7,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterAdminDto } from './dto/register-admin.dto';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { RegisterTeacherDto } from './dto/register-teacher.dto';
+import { RegisterDto } from './dto/register.dto';
 import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
 const INVALID_CREDENTIALS_MESSAGE = "Email/phone yoki parol noto'g'ri";
 type JwtPayload = {
@@ -33,6 +34,41 @@ export class AuthService {
     async login(dto: LoginDto) {
         const principal = await this.validateAny(dto);
         return this.buildAuthResponse(principal);
+    }
+    async register(dto: RegisterDto) {
+        const role = String(dto.role || '').toUpperCase();
+        if (role === Role.ADMIN) {
+            return this.registerAdmin({
+                fullName: dto.fullName,
+                email: dto.email,
+                phone: dto.phone,
+                position: dto.position,
+                password: dto.password,
+            });
+        }
+        if (role === Role.TEACHER) {
+            return this.registerTeacher({
+                fullName: dto.fullName,
+                email: dto.email,
+                phone: dto.phone,
+                photo: dto.photo,
+                birthDate: dto.birthDate,
+                position: dto.position,
+                experience: dto.experience,
+                password: dto.password,
+            });
+        }
+        if (role === Role.STUDENT) {
+            return this.registerStudent({
+                fullName: dto.fullName,
+                email: dto.email,
+                phone: dto.phone,
+                photo: dto.photo,
+                birthDate: dto.birthDate as string,
+                password: dto.password,
+            });
+        }
+        throw new BadRequestException('role must be one of ADMIN, TEACHER, STUDENT');
     }
     async registerAdmin(dto: RegisterAdminDto) {
         const fullName = String(dto.fullName || '').trim();

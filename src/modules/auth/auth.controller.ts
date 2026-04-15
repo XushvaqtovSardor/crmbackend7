@@ -2,9 +2,7 @@ import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Patch, Post } fro
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { RegisterAdminDto } from './dto/register-admin.dto';
-import { RegisterStudentDto } from './dto/register-student.dto';
-import { RegisterTeacherDto } from './dto/register-teacher.dto';
+import { RegisterDto } from './dto/register.dto';
 import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
 
 @Controller('auth')
@@ -22,37 +20,15 @@ export class AuthController {
         return this.authService.login(dto);
     }
 
-    @Post('register/admin')
+    @Post('register')
     @HttpCode(HttpStatus.CREATED)
-    @ApiOperation({ summary: 'Register admin/staff account (email or phone)' })
-    @ApiBody({ type: RegisterAdminDto })
-    @ApiResponse({ status: 201, description: 'Admin account created and JWT generated' })
+    @ApiOperation({ summary: 'Register account by role (ADMIN/TEACHER/STUDENT) using email or phone' })
+    @ApiBody({ type: RegisterDto })
+    @ApiResponse({ status: 201, description: 'Account created and JWT generated' })
     @ApiResponse({ status: 400, description: 'Invalid registration payload' })
     @ApiResponse({ status: 409, description: 'Email or phone already exists' })
-    registerAdmin(@Body() dto: RegisterAdminDto) {
-        return this.authService.registerAdmin(dto);
-    }
-
-    @Post('register/teacher')
-    @HttpCode(HttpStatus.CREATED)
-    @ApiOperation({ summary: 'Register teacher account (email or phone)' })
-    @ApiBody({ type: RegisterTeacherDto })
-    @ApiResponse({ status: 201, description: 'Teacher account created and JWT generated' })
-    @ApiResponse({ status: 400, description: 'Invalid registration payload' })
-    @ApiResponse({ status: 409, description: 'Email or phone already exists' })
-    registerTeacher(@Body() dto: RegisterTeacherDto) {
-        return this.authService.registerTeacher(dto);
-    }
-
-    @Post('register/student')
-    @HttpCode(HttpStatus.CREATED)
-    @ApiOperation({ summary: 'Register student account (email or phone)' })
-    @ApiBody({ type: RegisterStudentDto })
-    @ApiResponse({ status: 201, description: 'Student account created and JWT generated' })
-    @ApiResponse({ status: 400, description: 'Invalid registration payload' })
-    @ApiResponse({ status: 409, description: 'Email or phone already exists' })
-    registerStudent(@Body() dto: RegisterStudentDto) {
-        return this.authService.registerStudent(dto);
+    register(@Body() dto: RegisterDto) {
+        return this.authService.register(dto);
     }
 
     @Post('login/user')
