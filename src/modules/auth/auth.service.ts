@@ -1,9 +1,4 @@
-import {
-    BadRequestException,
-    ConflictException,
-    Injectable,
-    UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, UnauthorizedException, } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma, Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -13,14 +8,11 @@ import { RegisterAdminDto } from './dto/register-admin.dto';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { RegisterTeacherDto } from './dto/register-teacher.dto';
 import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
-
 const INVALID_CREDENTIALS_MESSAGE = "Email/phone yoki parol noto'g'ri";
-
 type JwtPayload = {
     sub: number;
     role: Role;
 };
-
 type AuthPrincipal = {
     id: number;
     email: string;
@@ -35,36 +27,21 @@ type AuthPrincipal = {
     coinBalance?: number | null;
     birthDate?: Date | null;
 };
-
 @Injectable()
 export class AuthService {
-    constructor(
-        private readonly prisma: PrismaService,
-        private readonly jwtService: JwtService,
-    ) { }
-
-    /** Universal login that tries platform user, teacher and student credentials in order. */
+    constructor(private readonly prisma: PrismaService, private readonly jwtService: JwtService) { }
     async login(dto: LoginDto) {
         const principal = await this.validateAny(dto);
         return this.buildAuthResponse(principal);
     }
-
     async registerAdmin(dto: RegisterAdminDto) {
         const fullName = String(dto.fullName || '').trim();
         if (!fullName) {
             throw new BadRequestException('fullName is required');
         }
-
-        const contacts = this.normalizeRegistrationContacts(
-            dto.email,
-            dto.phone,
-            'admin',
-        );
-
+        const contacts = this.normalizeRegistrationContacts(dto.email, dto.phone, 'admin');
         await this.assertUniqueContacts(contacts.email, contacts.phone);
-
         const passwordHash = await bcrypt.hash(dto.password, 10);
-
         try {
             const user = await this.prisma.user.create({
                 data: {
@@ -89,7 +66,6 @@ export class AuthService {
                     phone: true,
                 },
             });
-
             return this.buildAuthResponse({
                 id: user.id,
                 email: user.email,
@@ -101,33 +77,23 @@ export class AuthService {
                 position: user.position,
                 phone: user.phone,
             });
-        } catch (error) {
-            if (
-                error instanceof Prisma.PrismaClientKnownRequestError &&
-                error.code === 'P2002'
-            ) {
+        }
+        catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === 'P2002') {
                 throw new ConflictException('Account with this email or phone already exists');
             }
             throw error;
         }
     }
-
     async registerTeacher(dto: RegisterTeacherDto) {
         const fullName = String(dto.fullName || '').trim();
         if (!fullName) {
             throw new BadRequestException('fullName is required');
         }
-
-        const contacts = this.normalizeRegistrationContacts(
-            dto.email,
-            dto.phone,
-            'teacher',
-        );
-
+        const contacts = this.normalizeRegistrationContacts(dto.email, dto.phone, 'teacher');
         await this.assertUniqueContacts(contacts.email, contacts.phone);
-
         const passwordHash = await bcrypt.hash(dto.password, 10);
-
         try {
             const teacher = await this.prisma.teacher.create({
                 data: {
@@ -154,7 +120,6 @@ export class AuthService {
                     status: true,
                 },
             });
-
             return this.buildAuthResponse({
                 id: teacher.id,
                 email: teacher.email,
@@ -168,37 +133,26 @@ export class AuthService {
                 birthDate: teacher.birth_date,
                 status: teacher.status,
             });
-        } catch (error) {
-            if (
-                error instanceof Prisma.PrismaClientKnownRequestError &&
-                error.code === 'P2002'
-            ) {
+        }
+        catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === 'P2002') {
                 throw new ConflictException('Account with this email or phone already exists');
             }
             throw error;
         }
     }
-
     async registerStudent(dto: RegisterStudentDto) {
         const fullName = String(dto.fullName || '').trim();
         if (!fullName) {
             throw new BadRequestException('fullName is required');
         }
-
         if (!dto.birthDate) {
             throw new BadRequestException('birthDate is required for student registration');
         }
-
-        const contacts = this.normalizeRegistrationContacts(
-            dto.email,
-            dto.phone,
-            'student',
-        );
-
+        const contacts = this.normalizeRegistrationContacts(dto.email, dto.phone, 'student');
         await this.assertUniqueContacts(contacts.email, contacts.phone);
-
         const passwordHash = await bcrypt.hash(dto.password, 10);
-
         try {
             const student = await this.prisma.student.create({
                 data: {
@@ -220,7 +174,6 @@ export class AuthService {
                     status: true,
                 },
             });
-
             return this.buildAuthResponse({
                 id: student.id,
                 email: student.email,
@@ -231,96 +184,71 @@ export class AuthService {
                 birthDate: student.birth_date,
                 status: student.status,
             });
-        } catch (error) {
-            if (
-                error instanceof Prisma.PrismaClientKnownRequestError &&
-                error.code === 'P2002'
-            ) {
+        }
+        catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === 'P2002') {
                 throw new ConflictException('Account with this email or phone already exists');
             }
             throw error;
         }
     }
-
-    /** Explicit login endpoint for admin/superadmin/staff records in user table. */
     async loginUser(dto: LoginDto) {
         const principal = await this.validatePlatformUser(dto);
         return this.buildAuthResponse(principal);
     }
-
-    /** Explicit login endpoint for teacher accounts. */
     async loginTeacher(dto: LoginDto) {
         const principal = await this.validateTeacher(dto);
         return this.buildAuthResponse(principal);
     }
-
-    /** Explicit login endpoint for student accounts. */
     async loginStudent(dto: LoginDto) {
         const principal = await this.validateStudent(dto);
         return this.buildAuthResponse(principal);
     }
-
-    /** Resolves authenticated user profile from Bearer token payload. */
     async profile(authHeader: string) {
         const token = this.extractBearerToken(authHeader);
         if (!token) {
-            throw new UnauthorizedException(
-                'Authorization header with Bearer token is required',
-            );
+            throw new UnauthorizedException('Authorization header with Bearer token is required');
         }
-
         const payload = this.verifyAccessToken(token);
         const principal = await this.lookupProfile(payload.role, payload.sub);
-
         return {
             user: this.toUserPayload(principal),
         };
     }
-
-    /** Updates current authenticated user profile according to principal role table. */
     async updateProfile(authHeader: string, dto: UpdateMyProfileDto) {
         const token = this.extractBearerToken(authHeader);
         if (!token) {
-            throw new UnauthorizedException(
-                'Authorization header with Bearer token is required',
-            );
+            throw new UnauthorizedException('Authorization header with Bearer token is required');
         }
-
         const payload = this.verifyAccessToken(token);
-
         try {
             if (payload.role === Role.TEACHER) {
                 const updateData: Prisma.TeacherUpdateInput = {};
-
                 if (typeof dto.fullName === 'string') {
                     const fullName = dto.fullName.trim();
                     if (fullName) {
                         updateData.fullName = fullName;
                     }
                 }
-
                 if (typeof dto.email === 'string') {
                     const email = dto.email.trim().toLowerCase();
                     if (email) {
                         updateData.email = email;
                     }
                 }
-
                 if (typeof dto.photo === 'string') {
                     updateData.photo = dto.photo.trim() || null;
                 }
-
                 if (typeof dto.phone === 'string') {
                     updateData.phone = dto.phone.trim() || null;
                 }
-
                 if (typeof dto.position === 'string') {
                     const position = dto.position.trim();
                     if (position) {
                         updateData.position = position;
                     }
                 }
-
                 if (typeof dto.birthDate === 'string') {
                     const parsed = new Date(dto.birthDate);
                     if (Number.isNaN(parsed.getTime())) {
@@ -328,45 +256,39 @@ export class AuthService {
                     }
                     updateData.birth_date = parsed;
                 }
-
                 if (typeof dto.password === 'string') {
                     const password = dto.password.trim();
                     if (password) {
                         updateData.password = await bcrypt.hash(password, 10);
                     }
                 }
-
                 if (Object.keys(updateData).length > 0) {
                     await this.prisma.teacher.update({
                         where: { id: payload.sub },
                         data: updateData,
                     });
                 }
-            } else if (payload.role === Role.STUDENT) {
+            }
+            else if (payload.role === Role.STUDENT) {
                 const updateData: Prisma.StudentUpdateInput = {};
-
                 if (typeof dto.fullName === 'string') {
                     const fullName = dto.fullName.trim();
                     if (fullName) {
                         updateData.fullName = fullName;
                     }
                 }
-
                 if (typeof dto.email === 'string') {
                     const email = dto.email.trim().toLowerCase();
                     if (email) {
                         updateData.email = email;
                     }
                 }
-
                 if (typeof dto.photo === 'string') {
                     updateData.photo = dto.photo.trim() || null;
                 }
-
                 if (typeof dto.phone === 'string') {
                     updateData.phone = this.normalizePhoneValue(dto.phone) || null;
                 }
-
                 if (typeof dto.birthDate === 'string') {
                     const parsed = new Date(dto.birthDate);
                     if (Number.isNaN(parsed.getTime())) {
@@ -374,63 +296,54 @@ export class AuthService {
                     }
                     updateData.birth_date = parsed;
                 }
-
                 if (typeof dto.password === 'string') {
                     const password = dto.password.trim();
                     if (password) {
                         updateData.password = await bcrypt.hash(password, 10);
                     }
                 }
-
                 if (Object.keys(updateData).length > 0) {
                     await this.prisma.student.update({
                         where: { id: payload.sub },
                         data: updateData,
                     });
                 }
-            } else {
+            }
+            else {
                 const updateData: Prisma.UserUpdateInput = {};
-
                 if (typeof dto.fullName === 'string') {
                     const fullName = dto.fullName.trim();
                     if (fullName) {
                         updateData.fullName = fullName;
                     }
                 }
-
                 if (typeof dto.email === 'string') {
                     const email = dto.email.trim().toLowerCase();
                     if (email) {
                         updateData.email = email;
                     }
                 }
-
                 if (typeof dto.photo === 'string') {
                     updateData.photo = dto.photo.trim() || null;
                 }
-
                 if (typeof dto.phone === 'string') {
                     updateData.phone = this.normalizePhoneValue(dto.phone) || null;
                 }
-
                 if (typeof dto.position === 'string') {
                     const position = dto.position.trim();
                     if (position) {
                         updateData.position = position;
                     }
                 }
-
                 if (typeof dto.address === 'string') {
                     updateData.address = dto.address.trim() || null;
                 }
-
                 if (typeof dto.password === 'string') {
                     const password = dto.password.trim();
                     if (password) {
                         updateData.password = await bcrypt.hash(password, 10);
                     }
                 }
-
                 if (Object.keys(updateData).length > 0) {
                     await this.prisma.user.update({
                         where: { id: payload.sub },
@@ -438,23 +351,19 @@ export class AuthService {
                     });
                 }
             }
-        } catch (error) {
-            if (
-                error instanceof Prisma.PrismaClientKnownRequestError &&
-                error.code === 'P2002'
-            ) {
+        }
+        catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === 'P2002') {
                 throw new ConflictException('Account with this email or phone already exists');
             }
             throw error;
         }
-
         const principal = await this.lookupProfile(payload.role, payload.sub);
         return {
             user: this.toUserPayload(principal),
         };
     }
-
-    /** Signs JWT and returns unified auth payload for frontend session bootstrap. */
     private async buildAuthResponse(principal: AuthPrincipal) {
         const payload = {
             sub: principal.id,
@@ -462,38 +371,31 @@ export class AuthService {
             fullName: principal.fullName,
             role: principal.role,
         };
-
         const accessToken = await this.jwtService.signAsync(payload);
-
         return {
             accessToken,
             tokenType: 'Bearer',
             user: this.toUserPayload(principal),
         };
     }
-
-    /** Tries all supported account providers and only swallows invalid-credential errors. */
     private async validateAny(dto: LoginDto): Promise<AuthPrincipal> {
         const validators = [
             this.validatePlatformUser.bind(this),
             this.validateTeacher.bind(this),
             this.validateStudent.bind(this),
         ];
-
         for (const validate of validators) {
             try {
                 return await validate(dto);
-            } catch (error) {
+            }
+            catch (error) {
                 if (!this.isInvalidCredentialsError(error)) {
                     throw error;
                 }
             }
         }
-
         throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
-
-    /** Validates credentials against platform user records. */
     private async validatePlatformUser(dto: LoginDto): Promise<AuthPrincipal> {
         const identifier = this.parseLoginIdentifier(dto.email);
         const platformUser = await this.prisma.user.findFirst({
@@ -513,13 +415,10 @@ export class AuthService {
                 phone: true,
             },
         });
-
         if (!platformUser) {
             throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
         }
-
         await this.verifyPasswordOrThrow(dto.password, platformUser.password);
-
         return {
             id: platformUser.id,
             email: platformUser.email,
@@ -532,8 +431,6 @@ export class AuthService {
             phone: platformUser.phone,
         };
     }
-
-    /** Validates credentials against teacher table and maps to unified principal shape. */
     private async validateTeacher(dto: LoginDto): Promise<AuthPrincipal> {
         const identifier = this.parseLoginIdentifier(dto.email);
         const teacher = await this.prisma.teacher.findFirst({
@@ -554,13 +451,10 @@ export class AuthService {
                 status: true,
             },
         });
-
         if (!teacher) {
             throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
         }
-
         await this.verifyPasswordOrThrow(dto.password, teacher.password);
-
         return {
             id: teacher.id,
             email: teacher.email,
@@ -575,8 +469,6 @@ export class AuthService {
             status: teacher.status,
         };
     }
-
-    /** Validates credentials against student table and maps to unified principal shape. */
     private async validateStudent(dto: LoginDto): Promise<AuthPrincipal> {
         const identifier = this.parseLoginIdentifier(dto.email);
         const student = await this.prisma.student.findFirst({
@@ -594,13 +486,10 @@ export class AuthService {
                 status: true,
             },
         });
-
         if (!student) {
             throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
         }
-
         await this.verifyPasswordOrThrow(dto.password, student.password);
-
         return {
             id: student.id,
             email: student.email,
@@ -612,44 +501,34 @@ export class AuthService {
             status: student.status,
         };
     }
-
-    private normalizeRegistrationContacts(
-        emailInput: string | undefined,
-        phoneInput: string | undefined,
-        accountKey: 'admin' | 'teacher' | 'student',
-    ): { email: string; phone: string | null } {
+    private normalizeRegistrationContacts(emailInput: string | undefined, phoneInput: string | undefined, accountKey: 'admin' | 'teacher' | 'student'): {
+        email: string;
+        phone: string | null;
+    } {
         const email = typeof emailInput === 'string'
             ? emailInput.trim().toLowerCase()
             : '';
         const phone = typeof phoneInput === 'string'
             ? this.normalizePhoneValue(phoneInput)
             : '';
-
         if (!email && !phone) {
             throw new BadRequestException('Either email or phone is required');
         }
-
         return {
             email: email || this.buildPhoneEmail(phone, accountKey),
             phone: phone || null,
         };
     }
-
-    private buildPhoneEmail(
-        phone: string,
-        accountKey: 'admin' | 'teacher' | 'student',
-    ): string {
+    private buildPhoneEmail(phone: string, accountKey: 'admin' | 'teacher' | 'student'): string {
         const digitsOnly = phone.replace(/\D/g, '');
         if (!digitsOnly) {
             throw new BadRequestException('A valid email or phone is required');
         }
         return `${accountKey}_${digitsOnly}@phone.local`;
     }
-
     private normalizePhoneValue(phone: string): string {
         return String(phone || '').trim().replace(/[\s()-]/g, '');
     }
-
     private parseLoginIdentifier(identifier: string): {
         email: string | null;
         phone: string | null;
@@ -658,34 +537,23 @@ export class AuthService {
         if (!value) {
             throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
         }
-
         if (value.includes('@')) {
             return {
                 email: value.toLowerCase(),
                 phone: null,
             };
         }
-
         const normalizedPhone = this.normalizePhoneValue(value);
         if (!normalizedPhone) {
             throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
         }
-
         return {
             email: null,
             phone: normalizedPhone,
         };
     }
-
     private async assertUniqueContacts(email: string, phone: string | null) {
-        const [
-            userByEmail,
-            teacherByEmail,
-            studentByEmail,
-            userByPhone,
-            teacherByPhone,
-            studentByPhone,
-        ] = await Promise.all([
+        const [userByEmail, teacherByEmail, studentByEmail, userByPhone, teacherByPhone, studentByPhone,] = await Promise.all([
             this.prisma.user.findFirst({ where: { email }, select: { id: true } }),
             this.prisma.teacher.findFirst({ where: { email }, select: { id: true } }),
             this.prisma.student.findFirst({ where: { email }, select: { id: true } }),
@@ -699,44 +567,36 @@ export class AuthService {
                 ? this.prisma.student.findFirst({ where: { phone }, select: { id: true } })
                 : Promise.resolve(null),
         ]);
-
         if (userByEmail || teacherByEmail || studentByEmail) {
             throw new ConflictException('Account with this email already exists');
         }
-
         if (userByPhone || teacherByPhone || studentByPhone) {
             throw new ConflictException('Account with this phone already exists');
         }
     }
-
-    /** Extracts Bearer token from Authorization header value. */
     private extractBearerToken(authHeader: string): string | null {
-        if (!authHeader) return null;
+        if (!authHeader)
+            return null;
         const trimmed = authHeader.trim();
-        if (!trimmed.toLowerCase().startsWith('bearer ')) return null;
+        if (!trimmed.toLowerCase().startsWith('bearer '))
+            return null;
         return trimmed.slice(7).trim() || null;
     }
-
-    /** Verifies JWT and validates required identity fields used by profile lookup. */
     private verifyAccessToken(token: string): JwtPayload {
         try {
             const payload = this.jwtService.verify<JwtPayload>(token, {
                 algorithms: ['HS256'],
                 secret: process.env.JWT_SECRET || 'dev-secret',
             });
-
             if (!Number.isInteger(payload.sub) || !Object.values(Role).includes(payload.role)) {
                 throw new UnauthorizedException('Invalid token payload');
             }
-
             return payload;
-        } catch {
-
+        }
+        catch {
             throw new UnauthorizedException('Invalid or expired token');
         }
     }
-
-    /** Loads profile from role-specific table while keeping response contract unified. */
     private async lookupProfile(role: Role, id: number): Promise<AuthPrincipal> {
         switch (role) {
             case Role.TEACHER: {
@@ -755,11 +615,9 @@ export class AuthService {
                         status: true,
                     },
                 });
-
                 if (!teacher) {
                     throw new UnauthorizedException('Teacher account not found');
                 }
-
                 return {
                     id: teacher.id,
                     email: teacher.email,
@@ -787,11 +645,9 @@ export class AuthService {
                         status: true,
                     },
                 });
-
                 if (!student) {
                     throw new UnauthorizedException('Student account not found');
                 }
-
                 return {
                     id: student.id,
                     email: student.email,
@@ -818,11 +674,9 @@ export class AuthService {
                         status: true,
                     },
                 });
-
                 if (!user) {
                     throw new UnauthorizedException('User account not found');
                 }
-
                 return {
                     id: user.id,
                     email: user.email,
@@ -837,8 +691,6 @@ export class AuthService {
             }
         }
     }
-
-    /** Converts internal principal model to API-safe user payload object. */
     private toUserPayload(principal: AuthPrincipal) {
         return {
             id: principal.id,
@@ -855,16 +707,10 @@ export class AuthService {
             birthDate: principal.birthDate ?? null,
         };
     }
-
-    /** Checks whether caught error is expected invalid-credentials case. */
     private isInvalidCredentialsError(error: unknown): boolean {
-        return (
-            error instanceof UnauthorizedException &&
-            error.message === INVALID_CREDENTIALS_MESSAGE
-        );
+        return (error instanceof UnauthorizedException &&
+            error.message === INVALID_CREDENTIALS_MESSAGE);
     }
-
-    /** Verifies bcrypt password hash and throws unified auth message on mismatch. */
     private async verifyPasswordOrThrow(password: string, hash: string) {
         const matched = await bcrypt.compare(password, hash);
         if (!matched) {

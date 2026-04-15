@@ -1,57 +1,40 @@
 const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
 const { PrismaPg } = require('@prisma/adapter-pg');
-const {
-    CoinTransactionType,
-    PrismaClient,
-    CourseLevel,
-    HomeworkStatus,
-    HomeworkStatusStudent,
-    Role,
-    Status,
-    UserStatus,
-    WeekDays,
-} = require('@prisma/client');
-
-const connectionString =
-    process.env.DATABASE_URL ||
+const { CoinTransactionType, PrismaClient, CourseLevel, HomeworkStatus, HomeworkStatusStudent, Role, Status, UserStatus, WeekDays, } = require('@prisma/client');
+const connectionString = process.env.DATABASE_URL ||
     'postgresql://sardor:postgres@localhost:5432/imtihon5?schema=public';
-
 const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter, log: ['warn', 'error'] });
-
 async function resetDatabase() {
-    await prisma.$executeRawUnsafe(`
-    TRUNCATE TABLE
-            "TeacherCoinTransaction",
-      "Rating",
-      "HomeworkResult",
-      "HomeworkResponse",
-      "LessonVideo",
-      "Homework",
-      "Attendance",
-      "Lesson",
-      "StudentGroup",
-      "Group",
-      "Room",
-      "Course",
-      "Student",
-      "Teacher",
-      "User"
-    RESTART IDENTITY CASCADE;
+    await prisma.$executeRawUnsafe(`
+    TRUNCATE TABLE
+            "TeacherCoinTransaction",
+      "Rating",
+      "HomeworkResult",
+      "HomeworkResponse",
+      "LessonVideo",
+      "Homework",
+      "Attendance",
+      "Lesson",
+      "StudentGroup",
+      "Group",
+      "Room",
+      "Course",
+      "Student",
+      "Teacher",
+      "User"
+    RESTART IDENTITY CASCADE;
   `);
 }
-
 async function main() {
     const [adminPassword, teacherPassword, studentPassword] = await Promise.all([
         bcrypt.hash('superadmin', 10),
         bcrypt.hash('teacher', 10),
         bcrypt.hash('student', 10),
     ]);
-
     await resetDatabase();
-
     const superAdmin = await prisma.user.create({
         data: {
             fullName: 'Super Admin',
@@ -64,7 +47,6 @@ async function main() {
             address: 'Tashkent',
         },
     });
-
     const admin = await prisma.user.create({
         data: {
             fullName: 'Admin User',
@@ -77,7 +59,6 @@ async function main() {
             address: 'Tashkent',
         },
     });
-
     const teacher = await prisma.teacher.create({
         data: {
             fullName: "O'qituvchi",
@@ -92,7 +73,6 @@ async function main() {
             status: UserStatus.ACTIVE,
         },
     });
-
     const assistantTeacher = await prisma.teacher.create({
         data: {
             fullName: 'John Brown',
@@ -107,7 +87,6 @@ async function main() {
             status: UserStatus.ACTIVE,
         },
     });
-
     const student = await prisma.student.create({
         data: {
             fullName: 'Talaba',
@@ -117,7 +96,6 @@ async function main() {
             status: UserStatus.ACTIVE,
         },
     });
-
     const secondStudent = await prisma.student.create({
         data: {
             fullName: 'Munira',
@@ -127,7 +105,6 @@ async function main() {
             status: UserStatus.ACTIVE,
         },
     });
-
     const frontendCourse = await prisma.course.create({
         data: {
             name: 'Frontend React',
@@ -139,7 +116,6 @@ async function main() {
             status: Status.ACTIVE,
         },
     });
-
     const backendCourse = await prisma.course.create({
         data: {
             name: 'Backend Node.js',
@@ -151,7 +127,6 @@ async function main() {
             status: Status.ACTIVE,
         },
     });
-
     const roomA = await prisma.room.create({
         data: {
             name: 'Netflex',
@@ -159,7 +134,6 @@ async function main() {
             status: Status.ACTIVE,
         },
     });
-
     const roomB = await prisma.room.create({
         data: {
             name: 'Osmondagi bollar',
@@ -167,7 +141,6 @@ async function main() {
             status: Status.ACTIVE,
         },
     });
-
     const frontendGroup = await prisma.group.create({
         data: {
             teacherId: teacher.id,
@@ -181,7 +154,6 @@ async function main() {
             status: Status.ACTIVE,
         },
     });
-
     const backendGroup = await prisma.group.create({
         data: {
             teacherId: assistantTeacher.id,
@@ -195,7 +167,6 @@ async function main() {
             status: Status.ACTIVE,
         },
     });
-
     await prisma.studentGroup.createMany({
         data: [
             {
@@ -212,7 +183,6 @@ async function main() {
             },
         ],
     });
-
     await prisma.teacherCoinTransaction.createMany({
         data: [
             {
@@ -241,7 +211,6 @@ async function main() {
             },
         ],
     });
-
     const introLesson = await prisma.lesson.create({
         data: {
             groupId: frontendGroup.id,
@@ -249,7 +218,6 @@ async function main() {
             title: 'React',
         },
     });
-
     const hooksLesson = await prisma.lesson.create({
         data: {
             groupId: frontendGroup.id,
@@ -257,7 +225,6 @@ async function main() {
             title: 'Hooks',
         },
     });
-
     await prisma.lesson.create({
         data: {
             groupId: backendGroup.id,
@@ -265,7 +232,6 @@ async function main() {
             title: 'NestJS modul arxitekturasi',
         },
     });
-
     await prisma.lessonVideo.create({
         data: {
             lessonId: introLesson.id,
@@ -273,7 +239,6 @@ async function main() {
             file: 'https://cdn.example.com/videos/react-asoslari.mp4',
         },
     });
-
     const upcomingHomework = await prisma.homework.create({
         data: {
             lessonId: introLesson.id,
@@ -286,7 +251,6 @@ async function main() {
             allowLateSubmission: true,
         },
     });
-
     const reviewedHomework = await prisma.homework.create({
         data: {
             lessonId: hooksLesson.id,
@@ -299,7 +263,6 @@ async function main() {
             allowLateSubmission: false,
         },
     });
-
     await prisma.homeworkResponse.create({
         data: {
             homeworkId: upcomingHomework.id,
@@ -310,7 +273,6 @@ async function main() {
             attemptNo: 1,
         },
     });
-
     const reviewedResponse = await prisma.homeworkResponse.create({
         data: {
             homeworkId: reviewedHomework.id,
@@ -323,7 +285,6 @@ async function main() {
             reviewedAt: new Date('2026-03-12T10:30:00.000Z'),
         },
     });
-
     await prisma.homeworkResult.create({
         data: {
             homeworkId: reviewedHomework.id,
@@ -335,7 +296,6 @@ async function main() {
             status: HomeworkStatus.APPROVED,
         },
     });
-
     await prisma.rating.create({
         data: {
             teacherId: teacher.id,
@@ -343,7 +303,6 @@ async function main() {
             score: 5,
         },
     });
-
     console.log('Seed completed successfully.');
     console.log('Demo users:');
     console.log('  superadmin@gmail.com / admin123');
@@ -355,13 +314,12 @@ async function main() {
     console.log(`Superadmin header id: ${superAdmin.id}`);
     console.log(`Admin header id: ${admin.id}`);
 }
-
 main()
     .catch((error) => {
-        console.error('Seed failed:', error);
-        process.exitCode = 1;
-    })
+    console.error('Seed failed:', error);
+    process.exitCode = 1;
+})
     .finally(async () => {
-        await prisma.$disconnect();
-        await pool.end();
-    });
+    await prisma.$disconnect();
+    await pool.end();
+});
