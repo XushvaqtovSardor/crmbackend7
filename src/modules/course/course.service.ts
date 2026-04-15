@@ -10,8 +10,9 @@ import { Course, Prisma } from '@prisma/client';
 
 @Injectable()
 export class CourseService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
+  /** Creates a new course and protects unique name constraints. */
   async create(createCourseDto: CreateCourseDto): Promise<Course> {
     try {
       return await this.prisma.course.create({
@@ -28,6 +29,7 @@ export class CourseService {
     }
   }
 
+  /** Returns paginated course list with lightweight relation counters. */
   async findAll(
     page: number = 1,
     limit: number = 10,
@@ -37,12 +39,12 @@ export class CourseService {
     page: number;
     totalPages: number;
   }> {
-    const skip = (page - 1) * limit;
+    const pagination = this.normalizePagination(page, limit);
 
     const [data, total] = await Promise.all([
       this.prisma.course.findMany({
-        skip,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.limit,
         orderBy: { created_at: 'desc' },
         include: {
           _count: {
@@ -56,11 +58,12 @@ export class CourseService {
     return {
       data,
       total,
-      page,
-      totalPages: Math.ceil(total / limit),
+      page: pagination.page,
+      totalPages: Math.ceil(total / pagination.limit),
     };
   }
 
+  /** Loads full course details and nested group links by course id. */
   async findOne(id: number): Promise<Course> {
     const course = await this.prisma.course.findUnique({
       where: { id },
@@ -87,6 +90,7 @@ export class CourseService {
     return course;
   }
 
+  /** Updates existing course while preserving unique-name guarantee. */
   async update(id: number, updateCourseDto: UpdateCourseDto): Promise<Course> {
     await this.findOne(id);
 
@@ -106,6 +110,7 @@ export class CourseService {
     }
   }
 
+  /** Soft-deactivates a course to preserve historical references. */
   async remove(id: number): Promise<Course> {
     await this.findOne(id);
 
@@ -115,15 +120,32 @@ export class CourseService {
     });
   }
 
+  /** Performs case-insensitive search by course name/description. */
   async search(query: string): Promise<Course[]> {
+    const sanitizedQuery = query?.trim();
+    if (!sanitizedQuery) {
+      return [];
+    }
+
     return await this.prisma.course.findMany({
       where: {
         OR: [
-          { name: { contains: query, mode: 'insensitive' } },
-          { description: { contains: query, mode: 'insensitive' } },
+          { name: { contains: sanitizedQuery, mode: 'insensitive' } },
+          { description: { contains: sanitizedQuery, mode: 'insensitive' } },
         ],
       },
       take: 20,
     });
+  }
+
+  /** Normalizes pagination params and enforces safe API limits. */
+  private normalizePagination(page = 1, limit = 10) {
+    const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+    const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
+    return {
+      page: safePage,
+      limit: safeLimit,
+      skip: (safePage - 1) * safeLimit,
+    };
   }
 }

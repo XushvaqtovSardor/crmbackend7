@@ -6,6 +6,7 @@ import {
   IsInt,
   IsEnum,
   MinLength,
+  IsDateString,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -35,6 +36,15 @@ export class CreateTeacherDto {
   @IsString()
   @IsOptional()
   photo?: string;
+
+  @ApiPropertyOptional({
+    description: 'Teacher birth date in ISO format',
+    example: '1998-04-12',
+    format: 'date',
+  })
+  @IsDateString()
+  @IsOptional()
+  birth_date?: string;
 
   @ApiProperty({
     description: 'Teacher password',

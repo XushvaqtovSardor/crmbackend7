@@ -9,6 +9,7 @@ import { AuthService } from './auth.service';
             global: true,
             secret: process.env.JWT_SECRET || 'dev-secret',
             signOptions: {
+                algorithm: 'HS256',
                 expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as never,
             },
         }),

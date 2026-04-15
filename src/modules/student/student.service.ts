@@ -25,6 +25,7 @@ export class StudentService {
       const student = await this.prisma.student.create({
         data: {
           ...studentData,
+          phone: phone || null,
           password: hashedPassword,
           birth_date: new Date(studentData.birth_date),
         },
@@ -47,26 +48,29 @@ export class StudentService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException('Student with this email already exists');
+        throw new ConflictException('Student with this email or phone already exists');
       }
       throw error;
     }
   }
 
   async findAll(page: number = 1, limit: number = 10, status?: string) {
-    const skip = (page - 1) * limit;
+    const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+    const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
+    const skip = (safePage - 1) * safeLimit;
     const where = status ? { status: status as any } : {};
 
     const [data, total] = await Promise.all([
       this.prisma.student.findMany({
         skip,
-        take: limit,
+        take: safeLimit,
         where,
         orderBy: { created_at: 'desc' },
         select: {
           id: true,
           fullName: true,
           email: true,
+          phone: true,
           photo: true,
           birth_date: true,
           status: true,
@@ -87,8 +91,8 @@ export class StudentService {
     return {
       data,
       total,
-      page,
-      totalPages: Math.ceil(total / limit),
+      page: safePage,
+      totalPages: Math.ceil(total / safeLimit),
     };
   }
 
@@ -99,6 +103,7 @@ export class StudentService {
         id: true,
         fullName: true,
         email: true,
+        phone: true,
         photo: true,
         birth_date: true,
         status: true,
@@ -144,7 +149,10 @@ export class StudentService {
   ): Promise<Student> {
     await this.findOne(id);
 
-    const updateData: any = { ...updateStudentDto };
+    const { phone, ...rest } = updateStudentDto as UpdateStudentDto & {
+      phone?: string;
+    };
+    const updateData: any = { ...rest };
 
     if (updateStudentDto.password) {
       updateData.password = await bcrypt.hash(updateStudentDto.password, 10);
@@ -152,6 +160,10 @@ export class StudentService {
 
     if (updateStudentDto.birth_date) {
       updateData.birth_date = new Date(updateStudentDto.birth_date);
+    }
+
+    if (typeof phone !== 'undefined') {
+      updateData.phone = phone || null;
     }
 
     try {
@@ -167,7 +179,7 @@ export class StudentService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException('Student with this email already exists');
+        throw new ConflictException('Student with this email or phone already exists');
       }
       throw error;
     }
@@ -186,17 +198,24 @@ export class StudentService {
   }
 
   async search(query: string): Promise<any[]> {
+    const sanitizedQuery = String(query || '').trim();
+    if (!sanitizedQuery) {
+      return [];
+    }
+
     return await this.prisma.student.findMany({
       where: {
         OR: [
-          { fullName: { contains: query, mode: 'insensitive' } },
-          { email: { contains: query, mode: 'insensitive' } },
+          { fullName: { contains: sanitizedQuery, mode: 'insensitive' } },
+          { email: { contains: sanitizedQuery, mode: 'insensitive' } },
+          { phone: { contains: sanitizedQuery, mode: 'insensitive' } },
         ],
       },
       select: {
         id: true,
         fullName: true,
         email: true,
+        phone: true,
         photo: true,
         status: true,
       },

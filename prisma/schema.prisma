@@ -55,19 +55,25 @@ enum HomeworkStatusStudent {
   DELAY
 }
 
+enum CoinTransactionType {
+  CREDIT
+  DEBIT
+}
+
 model User {
-  id              Int              @id @default(autoincrement())
+  id              Int                      @id @default(autoincrement())
   fullName        String
-  email           String           @unique
+  email           String                   @unique
+  phone           String?                  @unique
   photo           String?
   password        String
   position        String
   hire_date       DateTime
   role            Role
   address         String?
-  status          UserStatus       @default(ACTIVE)
-  created_at      DateTime         @default(now())
-  updated_at      DateTime         @updatedAt
+  status          UserStatus               @default(ACTIVE)
+  created_at      DateTime                 @default(now())
+  updated_at      DateTime                 @updatedAt
   groups          Group[]
   attendances     Attendance[]
   lessons         Lesson[]
@@ -75,32 +81,41 @@ model User {
   lessonVideos    LessonVideo[]
   homeworkResults HomeworkResult[]
   studentGroups   StudentGroup[]
+  createdTeachers Teacher[]                @relation("TeacherCreatedBy")
+  teacherCoinLogs TeacherCoinTransaction[] @relation("TeacherCoinActor")
 }
 
 model Teacher {
-  id              Int              @id @default(autoincrement())
-  fullName        String
-  email           String           @unique
-  photo           String?
-  password        String
-  position        String
-  experience      Int
-  status          UserStatus       @default(ACTIVE)
-  created_at      DateTime         @default(now())
-  updated_at      DateTime         @updatedAt
-  groups          Group[]
-  attendances     Attendance[]
-  lessons         Lesson[]
-  homework        Homework[]
-  lessonVideos    LessonVideo[]
-  ratings         Rating[]
-  homeworkResults HomeworkResult[]
+  id               Int                      @id @default(autoincrement())
+  fullName         String
+  email            String                   @unique
+  phone            String?                  @unique
+  birth_date       DateTime?
+  photo            String?
+  password         String
+  position         String
+  experience       Int
+  coinBalance      Int                      @default(0)
+  createdBy        Int?
+  status           UserStatus               @default(ACTIVE)
+  created_at       DateTime                 @default(now())
+  updated_at       DateTime                 @updatedAt
+  groups           Group[]
+  attendances      Attendance[]
+  lessons          Lesson[]
+  homework         Homework[]
+  lessonVideos     LessonVideo[]
+  ratings          Rating[]
+  homeworkResults  HomeworkResult[]
+  createdByUser    User?                    @relation("TeacherCreatedBy", fields: [createdBy], references: [id])
+  coinTransactions TeacherCoinTransaction[]
 }
 
 model Student {
   id                Int                @id @default(autoincrement())
   fullName          String
   email             String             @unique
+  phone             String?            @unique
   photo             String?
   password          String
   birth_date        DateTime
@@ -290,4 +305,21 @@ model Rating {
 
   teacher Teacher @relation(fields: [teacherId], references: [id])
   lesson  Lesson  @relation(fields: [lessonId], references: [id])
+}
+
+model TeacherCoinTransaction {
+  id           Int                 @id @default(autoincrement())
+  teacherId    Int
+  amount       Int
+  balanceAfter Int
+  type         CoinTransactionType
+  reason       String?
+  createdBy    Int?
+  created_at   DateTime            @default(now())
+
+  teacher       Teacher @relation(fields: [teacherId], references: [id])
+  createdByUser User?   @relation("TeacherCoinActor", fields: [createdBy], references: [id])
+
+  @@index([teacherId, created_at])
+  @@index([createdBy])
 }

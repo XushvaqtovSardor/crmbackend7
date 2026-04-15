@@ -11,7 +11,7 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import {
     ApiBody,
     ApiOperation,
@@ -31,17 +31,18 @@ import { ErpService } from './erp.service';
 @Controller('erp')
 @UseGuards(RolesGuard)
 @ApiTags('erp')
+@ApiBearerAuth('access-token')
 @ApiSecurity('x-user-id')
 @ApiSecurity('x-user-role')
 @ApiHeader({
     name: 'x-user-id',
-    required: true,
-    description: 'Authenticated user id used by ERP endpoints',
+    required: false,
+    description: 'Optional for backward compatibility; auto-populated from Bearer token by RolesGuard',
 })
 @ApiHeader({
     name: 'x-user-role',
-    required: true,
-    description: 'Authenticated role. Examples: TEACHER, STUDENT, SUPERADMIN',
+    required: false,
+    description: 'Optional for backward compatibility; auto-populated from Bearer token by RolesGuard',
 })
 export class ErpController {
     constructor(private readonly erpService: ErpService) { }
@@ -167,6 +168,14 @@ export class ErpController {
     @ApiResponse({ status: 200, description: 'Student progress returned' })
     getStudentProgress(@Headers('x-user-id') studentId: string) {
         return this.erpService.getStudentProgress(this.parseUserId(studentId));
+    }
+
+    @Get('student/videos')
+    @Roles(Role.STUDENT)
+    @ApiOperation({ summary: 'Student lesson videos from joined groups' })
+    @ApiResponse({ status: 200, description: 'Student videos returned' })
+    getStudentVideos(@Headers('x-user-id') studentId: string) {
+        return this.erpService.getStudentVideos(this.parseUserId(studentId));
     }
 
     @Get('finance/report')

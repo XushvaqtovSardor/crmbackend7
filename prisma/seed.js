@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const {
+    CoinTransactionType,
     PrismaClient,
     CourseLevel,
     HomeworkStatus,
@@ -23,6 +24,7 @@ const prisma = new PrismaClient({ adapter, log: ['warn', 'error'] });
 async function resetDatabase() {
     await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+            "TeacherCoinTransaction",
       "Rating",
       "HomeworkResult",
       "HomeworkResponse",
@@ -80,9 +82,13 @@ async function main() {
         data: {
             fullName: "O'qituvchi",
             email: 'teacher@gmail.com',
+            phone: '+998901112233',
+            birth_date: new Date('1996-02-10T00:00:00.000Z'),
             password: teacherPassword,
             position: 'Frontend Mentor',
             experience: 5,
+            coinBalance: 80,
+            createdBy: admin.id,
             status: UserStatus.ACTIVE,
         },
     });
@@ -91,9 +97,13 @@ async function main() {
         data: {
             fullName: 'John Brown',
             email: 'john@gmail.com',
+            phone: '+998902223344',
+            birth_date: new Date('1993-08-21T00:00:00.000Z'),
             password: teacherPassword,
             position: 'Backend Mentor',
             experience: 4,
+            coinBalance: 30,
+            createdBy: admin.id,
             status: UserStatus.ACTIVE,
         },
     });
@@ -199,6 +209,35 @@ async function main() {
                 groupId: frontendGroup.id,
                 studentId: secondStudent.id,
                 status: Status.ACTIVE,
+            },
+        ],
+    });
+
+    await prisma.teacherCoinTransaction.createMany({
+        data: [
+            {
+                teacherId: teacher.id,
+                amount: 100,
+                balanceAfter: 100,
+                type: CoinTransactionType.CREDIT,
+                reason: 'Boshlangich bonus',
+                createdBy: admin.id,
+            },
+            {
+                teacherId: teacher.id,
+                amount: 20,
+                balanceAfter: 80,
+                type: CoinTransactionType.DEBIT,
+                reason: 'Sarflangan coin',
+                createdBy: admin.id,
+            },
+            {
+                teacherId: assistantTeacher.id,
+                amount: 30,
+                balanceAfter: 30,
+                type: CoinTransactionType.CREDIT,
+                reason: "Yangi o'qituvchi bonusi",
+                createdBy: admin.id,
             },
         ],
     });

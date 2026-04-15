@@ -18,10 +18,12 @@ export class TransformInterceptor<T> implements NestInterceptor<
   T,
   Response<T>
 > {
+  /** Wraps every successful handler result into the shared API success envelope. */
   intercept(
     context: ExecutionContext,
     next: CallHandler,
   ): Observable<Response<T>> {
+    // Centralizing shape here keeps controllers focused on business logic only.
     return next.handle().pipe(
       map((data) => ({
         success: true,

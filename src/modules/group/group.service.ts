@@ -3,17 +3,20 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { AddStudentToGroupDto } from './dto/add-student.dto';
-import { Group, Prisma } from '@prisma/client';
+import { UpsertGroupAttendanceDto } from './dto/upsert-group-attendance.dto';
+import { Group, Prisma, Role, Status } from '@prisma/client';
 
 @Injectable()
 export class GroupService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
+  /** Creates a group after validating all referenced foreign entities. */
   async create(createGroupDto: CreateGroupDto): Promise<Group> {
     // Verify related entities exist
     await this.verifyRelatedEntities(createGroupDto);
@@ -33,6 +36,14 @@ export class GroupService {
               email: true,
             },
           },
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              role: true,
+            },
+          },
           room: true,
         },
       });
@@ -47,14 +58,16 @@ export class GroupService {
     }
   }
 
+  /** Returns paginated groups with core relations and active membership snapshot. */
   async findAll(page: number = 1, limit: number = 10, status?: string) {
-    const skip = (page - 1) * limit;
-    const where = status ? { status: status as any } : {};
+    const pagination = this.normalizePagination(page, limit);
+    const statusFilter = this.parseStatusFilter(status);
+    const where = statusFilter ? { status: statusFilter } : {};
 
     const [data, total] = await Promise.all([
       this.prisma.group.findMany({
-        skip,
-        take: limit,
+        skip: pagination.skip,
+        take: pagination.limit,
         where,
         orderBy: { created_at: 'desc' },
         include: {
@@ -66,7 +79,33 @@ export class GroupService {
               email: true,
             },
           },
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              role: true,
+            },
+          },
           room: true,
+          studentGroup: {
+            where: {
+              status: Status.ACTIVE,
+            },
+            select: {
+              id: true,
+              studentId: true,
+              status: true,
+              student: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  email: true,
+                  status: true,
+                },
+              },
+            },
+          },
           _count: {
             select: {
               studentGroup: true,
@@ -81,11 +120,12 @@ export class GroupService {
     return {
       data,
       total,
-      page,
-      totalPages: Math.ceil(total / limit),
+      page: pagination.page,
+      totalPages: Math.ceil(total / pagination.limit),
     };
   }
 
+  /** Loads one group with related teacher/user/room/members/lesson details. */
   async findOne(id: number): Promise<any> {
     const group = await this.prisma.group.findUnique({
       where: { id },
@@ -97,6 +137,14 @@ export class GroupService {
             fullName: true,
             email: true,
             photo: true,
+          },
+        },
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            role: true,
           },
         },
         room: true,
@@ -127,6 +175,70 @@ export class GroupService {
     return group;
   }
 
+  /** Returns groups assigned to current teacher or student from JWT-derived identity. */
+  async findMyGroups(userId: number, rawRole: string) {
+    const role = String(rawRole || '').trim().toUpperCase() as Role;
+
+    if (role !== Role.TEACHER && role !== Role.STUDENT) {
+      throw new ForbiddenException('Only teacher or student can access this endpoint');
+    }
+
+    const where =
+      role === Role.TEACHER
+        ? { teacherId: userId }
+        : {
+          studentGroup: {
+            some: {
+              studentId: userId,
+              status: Status.ACTIVE,
+            },
+          },
+        };
+
+    return this.prisma.group.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      include: {
+        course: true,
+        teacher: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            photo: true,
+          },
+        },
+        room: true,
+        studentGroup: {
+          where: {
+            status: Status.ACTIVE,
+          },
+          select: {
+            id: true,
+            studentId: true,
+            status: true,
+            student: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                status: true,
+              },
+            },
+          },
+        },
+        _count: {
+          select: {
+            studentGroup: true,
+            lessons: true,
+          },
+        },
+      },
+      take: 200,
+    });
+  }
+
+  /** Updates group data and validates changed relation keys before saving. */
   async update(id: number, updateGroupDto: UpdateGroupDto): Promise<Group> {
     await this.findOne(id);
 
@@ -170,6 +282,7 @@ export class GroupService {
     }
   }
 
+  /** Soft-deactivates a group to preserve historical references. */
   async remove(id: number): Promise<Group> {
     await this.findOne(id);
 
@@ -179,8 +292,9 @@ export class GroupService {
     });
   }
 
+  /** Adds a student to a group after ensuring both group and student exist. */
   async addStudent(groupId: number, addStudentDto: AddStudentToGroupDto) {
-    const group = await this.findOne(groupId);
+    await this.findOne(groupId);
 
     // Verify student exists
     const student = await this.prisma.student.findUnique({
@@ -221,6 +335,7 @@ export class GroupService {
     }
   }
 
+  /** Removes student-group membership by group and student pair. */
   async removeStudent(groupId: number, studentId: number) {
     const studentGroup = await this.prisma.studentGroup.findFirst({
       where: {
@@ -238,6 +353,286 @@ export class GroupService {
     });
   }
 
+  /** Returns attendance snapshot for all active students in a group on a date. */
+  async getAttendance(groupId: number, rawDate?: string) {
+    const date = this.normalizeAttendanceDate(rawDate);
+
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      select: {
+        id: true,
+        name: true,
+        studentGroup: {
+          where: {
+            status: Status.ACTIVE,
+          },
+          orderBy: {
+            created_at: 'asc',
+          },
+          select: {
+            id: true,
+            studentId: true,
+            student: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!group) {
+      throw new NotFoundException(`Group with ID ${groupId} not found`);
+    }
+
+    const lesson = await this.prisma.lesson.findFirst({
+      where: {
+        groupId,
+        title: this.attendanceLessonTitle(date),
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const studentIds = group.studentGroup.map((item) => item.studentId);
+    const attendances = lesson
+      ? await this.prisma.attendance.findMany({
+        where: {
+          lessonId: lesson.id,
+          studentId: {
+            in: studentIds.length ? studentIds : [-1],
+          },
+        },
+        orderBy: {
+          updated_at: 'desc',
+        },
+        select: {
+          id: true,
+          studentId: true,
+          isPresent: true,
+          updated_at: true,
+        },
+      })
+      : [];
+
+    const attendanceByStudent = new Map<
+      number,
+      { id: number; isPresent: boolean; updated_at: Date }
+    >();
+
+    for (const row of attendances) {
+      if (!attendanceByStudent.has(row.studentId)) {
+        attendanceByStudent.set(row.studentId, row);
+      }
+    }
+
+    return {
+      groupId: group.id,
+      groupName: group.name,
+      date,
+      lessonId: lesson?.id || null,
+      students: group.studentGroup.map((membership) => {
+        const attendance = attendanceByStudent.get(membership.studentId);
+        return {
+          membershipId: membership.id,
+          studentId: membership.studentId,
+          fullName: membership.student.fullName,
+          email: membership.student.email,
+          status: membership.student.status,
+          isPresent: typeof attendance?.isPresent === 'boolean'
+            ? attendance.isPresent
+            : null,
+          updatedAt: attendance?.updated_at || null,
+        };
+      }),
+    };
+  }
+
+  /** Upserts one student's attendance row for a group/date pair. */
+  async upsertAttendance(groupId: number, dto: UpsertGroupAttendanceDto) {
+    const date = this.normalizeAttendanceDate(dto.date);
+
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      select: {
+        id: true,
+        teacherId: true,
+        studentGroup: {
+          where: {
+            studentId: dto.studentId,
+            status: Status.ACTIVE,
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+
+    if (!group) {
+      throw new NotFoundException(`Group with ID ${groupId} not found`);
+    }
+
+    if (!group.studentGroup.length) {
+      throw new BadRequestException('Student is not an active member of this group');
+    }
+
+    let lesson = await this.prisma.lesson.findFirst({
+      where: {
+        groupId,
+        title: this.attendanceLessonTitle(date),
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!lesson) {
+      lesson = await this.prisma.lesson.create({
+        data: {
+          groupId,
+          title: this.attendanceLessonTitle(date),
+          teacherId: group.teacherId,
+          userId: dto.userId,
+        },
+        select: {
+          id: true,
+        },
+      });
+    }
+
+    const latestAttendance = await this.prisma.attendance.findFirst({
+      where: {
+        lessonId: lesson.id,
+        studentId: dto.studentId,
+      },
+      orderBy: {
+        updated_at: 'desc',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const payload = {
+      isPresent: dto.isPresent,
+      teacherId: group.teacherId,
+      ...(dto.userId ? { userId: dto.userId } : {}),
+    };
+
+    const saved = latestAttendance
+      ? await this.prisma.attendance.update({
+        where: { id: latestAttendance.id },
+        data: payload,
+      })
+      : await this.prisma.attendance.create({
+        data: {
+          lessonId: lesson.id,
+          studentId: dto.studentId,
+          ...payload,
+        },
+      });
+
+    return {
+      id: saved.id,
+      groupId,
+      studentId: dto.studentId,
+      date,
+      isPresent: saved.isPresent,
+      updatedAt: saved.updated_at,
+    };
+  }
+
+  /** Deletes attendance records for selected group/date (optionally one student). */
+  async resetAttendance(groupId: number, rawDate: string, studentId?: number) {
+    const date = this.normalizeAttendanceDate(rawDate);
+
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      select: {
+        id: true,
+        studentGroup: {
+          where: {
+            status: Status.ACTIVE,
+            ...(studentId ? { studentId } : {}),
+          },
+          select: {
+            studentId: true,
+          },
+        },
+      },
+    });
+
+    if (!group) {
+      throw new NotFoundException(`Group with ID ${groupId} not found`);
+    }
+
+    if (studentId && !group.studentGroup.length) {
+      throw new BadRequestException('Student is not an active member of this group');
+    }
+
+    const lesson = await this.prisma.lesson.findFirst({
+      where: {
+        groupId,
+        title: this.attendanceLessonTitle(date),
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!lesson) {
+      return {
+        groupId,
+        date,
+        removed: 0,
+      };
+    }
+
+    const allowedIds = group.studentGroup.map((item) => item.studentId);
+    const deleteResult = await this.prisma.attendance.deleteMany({
+      where: {
+        lessonId: lesson.id,
+        studentId: {
+          in: allowedIds.length ? allowedIds : [-1],
+        },
+      },
+    });
+
+    return {
+      groupId,
+      date,
+      removed: deleteResult.count,
+      studentId: studentId || null,
+    };
+  }
+
+  /** Builds deterministic pseudo-lesson title used as attendance partition key. */
+  private attendanceLessonTitle(date: string) {
+    return `__ATTENDANCE__ ${date}`;
+  }
+
+  /** Normalizes incoming date to UTC YYYY-MM-DD for stable DB matching. */
+  private normalizeAttendanceDate(rawDate?: string) {
+    const parsed = rawDate ? new Date(rawDate) : new Date();
+
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('Invalid attendance date');
+    }
+
+    const year = parsed.getUTCFullYear();
+    const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getUTCDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  /** Ensures related teacher/room/course/user references exist before writes. */
   private async verifyRelatedEntities(dto: Partial<CreateGroupDto>) {
     if (dto.teacherId) {
       const teacher = await this.prisma.teacher.findUnique({
@@ -278,5 +673,33 @@ export class GroupService {
         throw new BadRequestException(`User with ID ${dto.userId} not found`);
       }
     }
+  }
+
+  /** Validates incoming status query and converts it to Status enum. */
+  private parseStatusFilter(status?: string): Status | undefined {
+    if (!status) {
+      return undefined;
+    }
+
+    const normalized = status.toUpperCase();
+    if (!Object.values(Status).includes(normalized as Status)) {
+      throw new BadRequestException(
+        `Invalid status filter. Allowed values: ${Object.values(Status).join(', ')}`,
+      );
+    }
+
+    return normalized as Status;
+  }
+
+  /** Normalizes pagination and caps limit to avoid heavy queries. */
+  private normalizePagination(page = 1, limit = 10) {
+    const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+    const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
+
+    return {
+      page: safePage,
+      limit: safeLimit,
+      skip: (safePage - 1) * safeLimit,
+    };
   }
 }
