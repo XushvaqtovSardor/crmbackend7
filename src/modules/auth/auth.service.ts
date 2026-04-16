@@ -26,6 +26,7 @@ import { VerificationEmailService } from '../../verification/verificationEmail.s
 
 const INVALID_CREDENTIALS_MESSAGE = "Email/phone yoki parol noto'g'ri";
 const REGISTER_OTP_KEY_PREFIX = 'auth:register:otp';
+const OTP_DEBUG_FALLBACK_ENABLED = true;
 
 type JwtPayload = {
     sub: number;
@@ -1227,8 +1228,7 @@ export class AuthService {
     }
 
     private isOtpDebugFallbackEnabled(): boolean {
-        const value = String(process.env.OTP_DEBUG_FALLBACK || '').trim().toLowerCase();
-        return value === '1' || value === 'true' || value === 'yes';
+        return OTP_DEBUG_FALLBACK_ENABLED;
     }
 
     private async verifyPasswordOrThrow(password: string, hash: string) {

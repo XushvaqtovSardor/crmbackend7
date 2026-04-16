@@ -329,7 +329,7 @@ export class NotificationService {
     }
 
     private buildOtpSmsText(otp: string, ttlSeconds: number): string {
-        const template = (process.env.OTP_SMS_TEMPLATE || OTP_SMS_TEMPLATE_DEFAULT).trim();
+        const template = OTP_SMS_TEMPLATE_DEFAULT;
 
         return template
             .replace(/\{\{\s*OTP\s*\}\}/g, otp)
