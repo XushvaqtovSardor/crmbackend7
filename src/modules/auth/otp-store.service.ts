@@ -14,6 +14,13 @@ export class OtpStoreService implements OnModuleDestroy {
         });
     }
 
+    async setJsonKeepTtl(key: string, payload: unknown): Promise<void> {
+        const client = await this.getClient();
+        await client.set(key, JSON.stringify(payload), {
+            KEEPTTL: true,
+        });
+    }
+
     async getJson<T>(key: string): Promise<T | null> {
         const client = await this.getClient();
         const value = await client.get(key);

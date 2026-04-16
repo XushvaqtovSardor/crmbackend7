@@ -3,6 +3,10 @@ import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { OtpStoreService } from './otp-store.service';
+import { SmsService } from '../../service/sms.service';
+import { EmailService } from '../../service/email.service';
+import { VerificationPhoneService } from '../../verification/verificatioin.service';
+import { VerificationEmailService } from '../../verification/verificationEmail.service';
 
 @Module({
     imports: [
@@ -16,7 +20,14 @@ import { OtpStoreService } from './otp-store.service';
         }),
     ],
     controllers: [AuthController],
-    providers: [AuthService, OtpStoreService],
+    providers: [
+        AuthService,
+        OtpStoreService,
+        SmsService,
+        EmailService,
+        VerificationPhoneService,
+        VerificationEmailService,
+    ],
     exports: [AuthService],
 })
 export class AuthModule { }

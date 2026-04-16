@@ -3,6 +3,7 @@ import {
     ConflictException,
     ForbiddenException,
     Injectable,
+    Logger,
     UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -20,6 +21,8 @@ import { RegisterTeacherDto } from './dto/register-teacher.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UpdateMyProfileDto } from './dto/update-my-profile.dto';
 import { VerifyRegisterOtpDto } from './dto/verify-register-otp.dto';
+import { VerificationPhoneService } from '../../verification/verificatioin.service';
+import { VerificationEmailService } from '../../verification/verificationEmail.service';
 
 const INVALID_CREDENTIALS_MESSAGE = "Email/phone yoki parol noto'g'ri";
 const REGISTER_OTP_KEY_PREFIX = 'auth:register:otp';
@@ -71,11 +74,15 @@ type RegisterOtpRecord = {
 
 @Injectable()
 export class AuthService {
+    private readonly logger = new Logger(AuthService.name);
+
     constructor(
         private readonly prisma: PrismaService,
         private readonly jwtService: JwtService,
         private readonly notificationService: NotificationService,
         private readonly otpStoreService: OtpStoreService,
+        private readonly verificationPhoneService: VerificationPhoneService,
+        private readonly verificationEmailService: VerificationEmailService,
     ) { }
 
     async login(dto: LoginDto) {
@@ -121,12 +128,33 @@ export class AuthService {
             },
         };
 
-        await this.otpStoreService.setJson(this.buildRegisterOtpKey(verificationId), record, ttlSeconds);
+        const registerOtpKey = this.buildRegisterOtpKey(verificationId);
+        await this.otpStoreService.setJson(registerOtpKey, record, ttlSeconds);
 
-        if (contact.channel === 'EMAIL') {
-            await this.notificationService.sendOtpEmail(contact.destination, otp, ttlSeconds);
-        } else {
-            await this.notificationService.sendOtpSms(contact.destination, otp, ttlSeconds);
+        const delivered = contact.channel === 'EMAIL'
+            ? await this.verificationEmailService.sendRegisterOtp(contact.destination, otp, ttlSeconds)
+            : await this.verificationPhoneService.sendRegisterOtp(contact.destination, otp, ttlSeconds);
+
+        if (!delivered) {
+            if (this.isOtpDebugFallbackEnabled()) {
+                this.logger.warn(
+                    `OTP delivery failed for ${contact.channel}:${contact.destination}; debug fallback is enabled`,
+                );
+
+                return {
+                    verificationId,
+                    channel: contact.channel,
+                    destination: this.maskContact(contact.channel, contact.destination),
+                    expiresIn: ttlSeconds,
+                    debugOtp: otp,
+                    message: "OTP provayderga yuborilmadi. Debug rejimda kod javobga qaytdi.",
+                };
+            }
+
+            await this.otpStoreService.delete(registerOtpKey);
+            throw new BadRequestException(
+                'OTP yuborilmadi. SMS/email provider sozlamalarini tekshiring yoki boshqa kanalni tanlang.',
+            );
         }
 
         return {
@@ -162,7 +190,7 @@ export class AuthService {
             }
 
             stored.attempts = nextAttempts;
-            await this.otpStoreService.setJson(key, stored, this.getRegisterOtpTtlSeconds());
+            await this.otpStoreService.setJsonKeepTtl(key, stored);
 
             throw new BadRequestException(`OTP noto'g'ri. Qolgan urinish: ${maxAttempts - nextAttempts}`);
         }
@@ -1196,6 +1224,11 @@ export class AuthService {
             error instanceof UnauthorizedException &&
             error.message === INVALID_CREDENTIALS_MESSAGE
         );
+    }
+
+    private isOtpDebugFallbackEnabled(): boolean {
+        const value = String(process.env.OTP_DEBUG_FALLBACK || '').trim().toLowerCase();
+        return value === '1' || value === 'true' || value === 'yes';
     }
 
     private async verifyPasswordOrThrow(password: string, hash: string) {

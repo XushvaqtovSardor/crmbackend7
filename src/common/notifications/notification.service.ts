@@ -5,6 +5,7 @@ import twilio from 'twilio';
 const ESKIZ_AUTH_URL = 'https://notify.eskiz.uz/api/auth/login';
 const ESKIZ_SEND_SMS_URL = 'https://notify.eskiz.uz/api/message/sms/send';
 const ESKIZ_TOKEN_TTL_MS = 55 * 60 * 1000;
+const OTP_SMS_TEMPLATE_DEFAULT = "Fixoo platformasidan ro'yxatdan o'tish uchun tasdiqlash kodi: {{OTP}}. Kodni hech kimga bermang!";
 
 type CredentialsPayload = {
     toEmail: string;
@@ -21,16 +22,16 @@ export class NotificationService {
     private eskizToken: string | null = null;
     private eskizTokenExpiresAt = 0;
 
-    async sendOtpEmail(toEmail: string, otp: string, ttlSeconds: number): Promise<void> {
+    async sendOtpEmail(toEmail: string, otp: string, ttlSeconds: number): Promise<boolean> {
         const host = process.env.SMTP_HOST;
         const port = Number(process.env.SMTP_PORT || '587');
         const user = process.env.SMTP_USER;
         const pass = process.env.SMTP_PASS;
-        const from = process.env.SMTP_FROM || user;
+        const from = this.resolveSmtpFrom(user);
 
         if (!host || !user || !pass || !from) {
             this.logger.warn(`SMTP is not configured. OTP email was skipped for ${toEmail}`);
-            return;
+            return false;
         }
 
         try {
@@ -56,22 +57,30 @@ export class NotificationService {
                 subject: 'EduERP tasdiqlash kodi',
                 text,
             });
+
+            return true;
         } catch (error) {
             this.logger.error(`Failed to send OTP email to ${toEmail}`, error as Error);
+            return false;
         }
     }
 
-    async sendOtpSms(toPhone: string, otp: string, ttlSeconds: number): Promise<void> {
-        const sent = await this.sendSms(
-            toPhone,
-            `Fixoo platformasidan ro'yxatdan o'tish uchun tasdiqlash kodi: ${otp}. Kod ${ttlSeconds} soniya amal qiladi.`,
-        );
+    async sendOtpSms(toPhone: string, otp: string, ttlSeconds: number): Promise<boolean> {
+        const sent = await this.sendSms(toPhone, this.buildOtpSmsText(otp, ttlSeconds));
 
         if (!sent) {
-            this.logger.warn(
-                `SMS provider is not configured (Twilio/Eskiz). OTP SMS was skipped for ${toPhone}`,
-            );
+            if (!this.isSmsProviderConfigured()) {
+                this.logger.warn(
+                    `SMS provider is not configured (Twilio/Eskiz). OTP SMS was skipped for ${toPhone}`,
+                );
+            } else {
+                this.logger.error(
+                    `OTP SMS send failed for ${toPhone}. Check provider credentials and Eskiz approved template text.`,
+                );
+            }
         }
+
+        return sent;
     }
 
     async sendCredentials(payload: CredentialsPayload): Promise<void> {
@@ -86,7 +95,7 @@ export class NotificationService {
         const port = Number(process.env.SMTP_PORT || '587');
         const user = process.env.SMTP_USER;
         const pass = process.env.SMTP_PASS;
-        const from = process.env.SMTP_FROM || user;
+        const from = this.resolveSmtpFrom(user);
 
         if (!host || !user || !pass || !from) {
             this.logger.warn(
@@ -141,9 +150,15 @@ export class NotificationService {
         );
 
         if (!sent) {
-            this.logger.warn(
-                `SMS provider is not configured (Twilio/Eskiz). Credentials SMS was skipped for ${toPhone}`,
-            );
+            if (!this.isSmsProviderConfigured()) {
+                this.logger.warn(
+                    `SMS provider is not configured (Twilio/Eskiz). Credentials SMS was skipped for ${toPhone}`,
+                );
+            } else {
+                this.logger.error(
+                    `Credentials SMS send failed for ${toPhone}. Check provider credentials and Eskiz approved template text.`,
+                );
+            }
         }
     }
 
@@ -311,6 +326,39 @@ export class NotificationService {
         }
 
         return value.replace(/\D/g, '');
+    }
+
+    private buildOtpSmsText(otp: string, ttlSeconds: number): string {
+        const template = (process.env.OTP_SMS_TEMPLATE || OTP_SMS_TEMPLATE_DEFAULT).trim();
+
+        return template
+            .replace(/\{\{\s*OTP\s*\}\}/g, otp)
+            .replace(/\{\{\s*TTL\s*\}\}/g, String(ttlSeconds));
+    }
+
+    private resolveSmtpFrom(user?: string): string {
+        const from = String(process.env.SMTP_FROM || '').trim();
+        if (from.includes('@')) {
+            return from;
+        }
+
+        return String(user || '').trim();
+    }
+
+    private isSmsProviderConfigured(): boolean {
+        const hasTwilio = Boolean(
+            process.env.TWILIO_ACCOUNT_SID
+            && process.env.TWILIO_AUTH_TOKEN
+            && process.env.TWILIO_FROM_PHONE,
+        );
+
+        const hasEskiz = Boolean(
+            (process.env.ESKIZ_EMAIL || process.env.SMS_API_KEY)
+            && (process.env.ESKIZ_PASSWORD || process.env.SMS_API_SECRET)
+            && (process.env.ESKIZ_FROM || process.env.SMS_FROM),
+        );
+
+        return hasTwilio || hasEskiz;
     }
 
     private clearEskizToken(): void {
