@@ -144,8 +144,47 @@ export class GroupService {
                     },
                 },
                 lessons: {
-                    take: 10,
-                    orderBy: { created_at: 'desc' },
+                    where: {
+                        title: {
+                            not: {
+                                startsWith: '__ATTENDANCE__',
+                            },
+                        },
+                    },
+                    orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+                    include: {
+                        lessonVideos: {
+                            orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+                            select: {
+                                id: true,
+                                file: true,
+                                created_at: true,
+                                teacherId: true,
+                                userId: true,
+                            },
+                        },
+                        homework: {
+                            orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+                            select: {
+                                id: true,
+                                title: true,
+                                file: true,
+                                durationTime: true,
+                                deadlineAt: true,
+                                maxAttempts: true,
+                                allowLateSubmission: true,
+                                created_at: true,
+                                updated_at: true,
+                            },
+                        },
+                        _count: {
+                            select: {
+                                lessonVideos: true,
+                                homework: true,
+                                attendances: true,
+                            },
+                        },
+                    },
                 },
             },
         });
