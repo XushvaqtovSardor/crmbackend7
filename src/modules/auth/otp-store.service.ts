@@ -49,9 +49,13 @@ export class OtpStoreService implements OnModuleDestroy {
             return this.connectingPromise;
         }
 
-        const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+        const redisUrl = this.resolveRedisUrl();
         const client = createClient({
             url: redisUrl,
+            socket: {
+                // Avoid endless reconnect loops that flood logs when Redis is down.
+                reconnectStrategy: () => false,
+            },
         });
 
         client.on('error', (error) => {
@@ -68,10 +72,23 @@ export class OtpStoreService implements OnModuleDestroy {
             })
             .catch((error) => {
                 this.connectingPromise = null;
+                this.client = null;
+                client.destroy();
                 this.logger.error('Failed to connect to Redis', error as Error);
                 throw new ServiceUnavailableException('OTP xizmati vaqtincha ishlamayapti (Redis ulanmagan)');
             });
 
         return this.connectingPromise;
+    }
+
+    private resolveRedisUrl(): string {
+        const redisUrl = process.env.REDIS_URL?.trim();
+        if (redisUrl) {
+            return redisUrl;
+        }
+
+        const host = process.env.REDIS_HOST?.trim() || '127.0.0.1';
+        const port = process.env.REDIS_PORT?.trim() || '6379';
+        return `redis://${host}:${port}`;
     }
 }
