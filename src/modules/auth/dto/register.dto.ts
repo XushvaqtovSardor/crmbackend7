@@ -1,17 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsEmail, IsIn, IsInt, IsOptional, IsString, Matches, Min, MinLength, ValidateIf } from 'class-validator';
-
-const REGISTER_ROLES = ['ADMIN', 'TEACHER', 'STUDENT'] as const;
+import { Transform } from 'class-transformer';
+import { IsDateString, IsEmail, IsIn, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 
 export class RegisterDto {
-    @ApiProperty({
-        description: 'Account role to create',
-        enum: REGISTER_ROLES,
-        example: 'STUDENT',
-    })
-    @IsIn(REGISTER_ROLES)
-    role!: 'ADMIN' | 'TEACHER' | 'STUDENT';
-
     @ApiProperty({ description: 'Full name', example: 'Aziza Karimova' })
     @IsString()
     fullName!: string;
@@ -31,24 +22,22 @@ export class RegisterDto {
     @MinLength(6)
     password!: string;
 
-    @ApiPropertyOptional({ description: 'Position (admin/teacher)', example: 'Frontend Mentor' })
-    @IsString()
-    @IsOptional()
-    position?: string;
-
     @ApiPropertyOptional({ description: 'Profile photo URL', example: 'https://cdn.example.com/profile.jpg' })
     @IsString()
     @IsOptional()
     photo?: string;
 
-    @ApiPropertyOptional({ description: 'Birth date in ISO format', example: '2006-05-12', format: 'date' })
-    @ValidateIf((o: RegisterDto) => o.role === 'STUDENT' || typeof o.birthDate === 'string')
+    @ApiProperty({ description: 'Birth date in ISO format', example: '2006-05-12', format: 'date' })
     @IsDateString()
-    birthDate?: string;
+    birthDate!: string;
 
-    @ApiPropertyOptional({ description: 'Years of experience (teacher)', example: 3 })
-    @ValidateIf((o: RegisterDto) => o.role === 'TEACHER' || typeof o.experience === 'number')
-    @IsInt()
-    @Min(0)
-    experience?: number;
+    @ApiPropertyOptional({
+        description: 'Deprecated for public register. Any provided value is normalized to STUDENT.',
+        enum: ['STUDENT'],
+        default: 'STUDENT',
+    })
+    @Transform(() => 'STUDENT', { toClassOnly: true })
+    @IsOptional()
+    @IsIn(['STUDENT'])
+    role?: 'STUDENT';
 }

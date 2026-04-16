@@ -36,6 +36,14 @@ export class TeacherController {
     constructor(private readonly teacherService: TeacherService) { }
 
     @Post()
+    @UseGuards(RolesGuard)
+    @Roles(Role.SUPERADMIN)
+    @ApiBearerAuth('access-token')
+    @ApiHeader({
+        name: 'x-user-id',
+        required: false,
+        description: 'Auto-populated from Bearer token by RolesGuard',
+    })
     @ApiOperation({ summary: 'Create teacher' })
     @ApiBody({ type: CreateTeacherDto })
     @ApiResponse({ status: 201, description: 'Teacher created' })

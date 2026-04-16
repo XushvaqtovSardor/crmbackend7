@@ -11,10 +11,9 @@ export class RegisterAdminDto {
     @IsOptional()
     email?: string;
 
-    @ApiPropertyOptional({ description: 'Phone number', example: '+998901234567' })
+    @ApiProperty({ description: 'Phone number (required for SMS credentials)', example: '+998901234567' })
     @Matches(/^\+?[1-9]\d{8,14}$/)
-    @IsOptional()
-    phone?: string;
+    phone!: string;
 
     @ApiPropertyOptional({ description: 'Position', example: 'Administrator' })
     @IsString()

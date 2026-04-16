@@ -52,6 +52,11 @@ export class TeacherService {
 
   async create(createTeacherDto: CreateTeacherDto, createdBy?: number | null) {
     const { phone, birth_date, password, ...teacherData } = createTeacherDto;
+
+    if (!String(phone || '').trim()) {
+      throw new BadRequestException('Teacher phone is required for SMS credentials');
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     try {
@@ -70,7 +75,7 @@ export class TeacherService {
         toEmail: teacher.email,
         toPhone: phone,
         fullName: teacher.fullName,
-        login: teacher.email,
+        login: phone || teacher.email,
         password,
         accountType: 'TEACHER',
       });
