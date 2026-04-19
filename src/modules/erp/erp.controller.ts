@@ -8,16 +8,25 @@ import {
     ParseIntPipe,
     Patch,
     Post,
+    Req,
+    UploadedFile,
     UseGuards,
+    UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '@prisma/client';
 import { ApiBearerAuth, ApiHeader, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import {
     ApiBody,
+    ApiConsumes,
     ApiOperation,
     ApiParam,
     ApiResponse,
 } from '@nestjs/swagger';
+import type { Request } from 'express';
+import { mkdirSync } from 'node:fs';
+import { extname, join } from 'node:path';
+import { diskStorage } from 'multer';
 import { Roles } from '../../common/auth/roles.decorator';
 import { RolesGuard } from '../../common/auth/roles.guard';
 import { AssignHomeworkDto } from './dto/assign-homework.dto';
@@ -27,6 +36,96 @@ import { ReviewHomeworkDto } from './dto/review-homework.dto';
 import { SubmitHomeworkDto } from './dto/submit-homework.dto';
 import { UpdateHomeworkPolicyDto } from './dto/update-homework-policy.dto';
 import { ErpService } from './erp.service';
+
+const VIDEO_UPLOAD_DIR = join(process.cwd(), 'uploads', 'lesson-videos');
+const VIDEO_UPLOAD_MAX_SIZE =
+    Number.parseInt(process.env.VIDEO_UPLOAD_MAX_SIZE || '', 10) ||
+    250 * 1024 * 1024;
+const IMAGE_UPLOAD_DIR = join(process.cwd(), 'uploads', 'profile-images');
+const IMAGE_UPLOAD_MAX_SIZE =
+    Number.parseInt(process.env.IMAGE_UPLOAD_MAX_SIZE || '', 10) ||
+    5 * 1024 * 1024;
+
+function ensureVideoUploadDir() {
+    mkdirSync(VIDEO_UPLOAD_DIR, { recursive: true });
+}
+
+function ensureImageUploadDir() {
+    mkdirSync(IMAGE_UPLOAD_DIR, { recursive: true });
+}
+
+function resolveVideoExtension(originalName: string) {
+    const extension = extname(String(originalName || '')).toLowerCase();
+    if (extension && /^[a-z0-9.]+$/.test(extension)) {
+        return extension;
+    }
+    return '.mp4';
+}
+
+function isSupportedVideoFile(file: { mimetype?: string; originalname?: string }) {
+    const mimeType = String(file.mimetype || '').toLowerCase();
+    if (mimeType.startsWith('video/')) {
+        return true;
+    }
+
+    const extension = resolveVideoExtension(file.originalname || '');
+    return ['.mp4', '.webm', '.mov', '.m4v', '.avi', '.mkv', '.ogg'].includes(
+        extension,
+    );
+}
+
+function buildVideoFileName(originalName: string) {
+    const extension = resolveVideoExtension(originalName);
+    const random = Math.random().toString(36).slice(2, 10);
+    return `${Date.now()}-${random}${extension}`;
+}
+
+function resolveImageExtension(originalName: string, mimeType?: string) {
+    const extension = extname(String(originalName || '')).toLowerCase();
+    if (extension && /^[a-z0-9.]+$/.test(extension)) {
+        return extension;
+    }
+
+    const normalizedMime = String(mimeType || '').toLowerCase();
+    if (normalizedMime === 'image/png') return '.png';
+    if (normalizedMime === 'image/webp') return '.webp';
+    if (normalizedMime === 'image/gif') return '.gif';
+    if (normalizedMime === 'image/svg+xml') return '.svg';
+
+    return '.jpg';
+}
+
+function isSupportedImageFile(file: { mimetype?: string; originalname?: string }) {
+    const mimeType = String(file.mimetype || '').toLowerCase();
+    if (!mimeType.startsWith('image/')) {
+        return false;
+    }
+
+    const extension = resolveImageExtension(file.originalname || '', mimeType);
+    return ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg'].includes(
+        extension,
+    );
+}
+
+function buildImageFileName(originalName: string, mimeType?: string) {
+    const extension = resolveImageExtension(originalName, mimeType);
+    const random = Math.random().toString(36).slice(2, 10);
+    return `${Date.now()}-${random}${extension}`;
+}
+
+function buildPublicFileUrl(req: Request, relativeUrl: string) {
+    const forwardedProto = req.headers['x-forwarded-proto'];
+    const protocol = String(
+        Array.isArray(forwardedProto)
+            ? forwardedProto[0]
+            : forwardedProto || req.protocol || 'http',
+    )
+        .split(',')[0]
+        .trim();
+    const host = req.get('host');
+
+    return host ? `${protocol}://${host}${relativeUrl}` : relativeUrl;
+}
 
 @Controller('erp')
 @UseGuards(RolesGuard)
@@ -71,6 +170,153 @@ export class ErpController {
         @Body() dto: PublishVideoDto,
     ) {
         return this.erpService.publishVideo(this.parseUserId(teacherId), dto);
+    }
+
+    @Post('teacher/videos/upload')
+    @Roles(Role.TEACHER)
+    @UseInterceptors(
+        FileInterceptor('file', {
+            storage: diskStorage({
+                destination: (_req, _file, callback) => {
+                    ensureVideoUploadDir();
+                    callback(null, VIDEO_UPLOAD_DIR);
+                },
+                filename: (_req, file, callback) => {
+                    callback(null, buildVideoFileName(file.originalname));
+                },
+            }),
+            limits: {
+                fileSize: VIDEO_UPLOAD_MAX_SIZE,
+            },
+            fileFilter: (_req, file, callback) => {
+                if (!isSupportedVideoFile(file)) {
+                    callback(
+                        new BadRequestException(
+                            'Faqat video fayllar qabul qilinadi',
+                        ),
+                        false,
+                    );
+                    return;
+                }
+
+                callback(null, true);
+            },
+        }),
+    )
+    @ApiOperation({
+        summary: 'Teacher uploads raw video file and receives public URL',
+    })
+    @ApiConsumes('multipart/form-data')
+    @ApiBody({
+        schema: {
+            type: 'object',
+            properties: {
+                file: {
+                    type: 'string',
+                    format: 'binary',
+                },
+            },
+            required: ['file'],
+        },
+    })
+    @ApiResponse({ status: 201, description: 'Video uploaded' })
+    uploadLessonVideo(
+        @Headers('x-user-id') teacherId: string,
+        @UploadedFile() file: Express.Multer.File,
+        @Req() req: Request,
+    ) {
+        this.parseUserId(teacherId);
+
+        if (!file) {
+            throw new BadRequestException('Video fayli topilmadi');
+        }
+
+        const relativeUrl = `/uploads/lesson-videos/${file.filename}`;
+
+        return {
+            fileName: file.originalname,
+            relativeUrl,
+            url: buildPublicFileUrl(req, relativeUrl),
+            mimeType: file.mimetype,
+            size: file.size,
+        };
+    }
+
+    @Post('media/images/upload')
+    @Roles(
+        Role.SUPERADMIN,
+        Role.ADMIN,
+        Role.MANAGEMENT,
+        Role.ADMINSTRATOR,
+        Role.TEACHER,
+        Role.STUDENT,
+    )
+    @UseInterceptors(
+        FileInterceptor('file', {
+            storage: diskStorage({
+                destination: (_req, _file, callback) => {
+                    ensureImageUploadDir();
+                    callback(null, IMAGE_UPLOAD_DIR);
+                },
+                filename: (_req, file, callback) => {
+                    callback(
+                        null,
+                        buildImageFileName(file.originalname, file.mimetype),
+                    );
+                },
+            }),
+            limits: {
+                fileSize: IMAGE_UPLOAD_MAX_SIZE,
+            },
+            fileFilter: (_req, file, callback) => {
+                if (!isSupportedImageFile(file)) {
+                    callback(
+                        new BadRequestException(
+                            'Faqat rasm fayllar qabul qilinadi',
+                        ),
+                        false,
+                    );
+                    return;
+                }
+
+                callback(null, true);
+            },
+        }),
+    )
+    @ApiOperation({
+        summary: 'Upload profile image and receive public URL',
+    })
+    @ApiConsumes('multipart/form-data')
+    @ApiBody({
+        schema: {
+            type: 'object',
+            properties: {
+                file: {
+                    type: 'string',
+                    format: 'binary',
+                },
+            },
+            required: ['file'],
+        },
+    })
+    @ApiResponse({ status: 201, description: 'Image uploaded' })
+    uploadProfileImage(
+        @UploadedFile() file: Express.Multer.File,
+        @Req() req: Request,
+    ) {
+        if (!file) {
+            throw new BadRequestException('Rasm fayli topilmadi');
+        }
+
+        const relativeUrl = `/uploads/profile-images/${file.filename}`;
+
+        return {
+            fileName: file.originalname,
+            relativeUrl,
+            url: buildPublicFileUrl(req, relativeUrl),
+            mimeType: file.mimetype,
+            size: file.size,
+        };
     }
 
     @Post('teacher/homeworks')

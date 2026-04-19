@@ -2,9 +2,10 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compression from 'compression';
-import { json, urlencoded } from 'express';
+import { json, static as expressStatic, urlencoded } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
+import { join } from 'node:path';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
@@ -20,6 +21,7 @@ async function bootstrap() {
 
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.set('trust proxy', 1);
+  expressApp.use('/uploads', expressStatic(join(process.cwd(), 'uploads')));
 
   const allowedOrigins = (
     process.env.FRONTEND_URLS ||
