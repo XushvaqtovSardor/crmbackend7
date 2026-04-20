@@ -48,6 +48,22 @@ jobs:
             echo "Running containers"
             docker compose up -d
 
+            if command -v nginx >/dev/null 2>&1; then
+              echo "Applying Nginx upload size limit for large lesson videos"
+              cat > /etc/nginx/conf.d/erp-upload-limit.conf <<'EOF'
+client_max_body_size 600M;
+EOF
+
+              nginx -t
+              if command -v systemctl >/dev/null 2>&1; then
+                systemctl reload nginx || nginx -s reload
+              else
+                nginx -s reload
+              fi
+            else
+              echo "Nginx not found on host, skipping upload limit setup"
+            fi
+
             echo "Waiting for services to be ready"
             sleep 10
 
