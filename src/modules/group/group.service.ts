@@ -23,6 +23,7 @@ export class GroupService {
                             id: true,
                             fullName: true,
                             email: true,
+                            photo: true,
                         },
                     },
                     user: {
@@ -62,6 +63,7 @@ export class GroupService {
                             id: true,
                             fullName: true,
                             email: true,
+                            photo: true,
                         },
                     },
                     user: {
@@ -272,6 +274,7 @@ export class GroupService {
                             id: true,
                             fullName: true,
                             email: true,
+                            photo: true,
                         },
                     },
                     room: true,
