@@ -64,7 +64,7 @@ export class GroupController {
 
     @Get('my')
     @UseGuards(RolesGuard)
-    @Roles(Role.TEACHER, Role.STUDENT)
+    @Roles(Role.TEACHER, Role.STUDENT, Role.SUPERADMIN)
     @ApiBearerAuth('access-token')
     @ApiHeader({
         name: 'x-user-id',

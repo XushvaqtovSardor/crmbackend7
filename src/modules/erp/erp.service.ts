@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, } from '@nestjs/common';
-import { HomeworkStatus, HomeworkStatusStudent, Prisma } from '@prisma/client';
+import { HomeworkStatus, HomeworkStatusStudent, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AssignHomeworkDto } from './dto/assign-homework.dto';
 import { CreateLessonDto } from './dto/create-lesson.dto';
@@ -10,13 +10,23 @@ import { UpdateHomeworkPolicyDto } from './dto/update-homework-policy.dto';
 @Injectable()
 export class ErpService {
     constructor(private readonly prisma: PrismaService) { }
-    async createLesson(teacherId: number, dto: CreateLessonDto) {
-        await this.ensureTeacherCanManageGroup(teacherId, dto.groupId);
+    async createLesson(actorId: number, actorRole: Role, dto: CreateLessonDto) {
+        const managedGroup = await this.ensureGroupExists(dto.groupId);
+
+        if (!this.isSuperAdmin(actorRole)) {
+            await this.ensureTeacherCanManageGroup(actorId, dto.groupId);
+        }
+
+        const ownerTeacherId = this.isSuperAdmin(actorRole)
+            ? managedGroup.teacherId
+            : actorId;
+
         return this.prisma.lesson.create({
             data: {
                 groupId: dto.groupId,
                 title: dto.title,
-                teacherId,
+                teacherId: ownerTeacherId,
+                userId: this.isSuperAdmin(actorRole) ? actorId : undefined,
             },
             include: {
                 group: {
@@ -28,38 +38,60 @@ export class ErpService {
             },
         });
     }
-    async publishVideo(teacherId: number, dto: PublishVideoDto) {
+    async publishVideo(actorId: number, actorRole: Role, dto: PublishVideoDto) {
         const lesson = await this.prisma.lesson.findUnique({
             where: { id: dto.lessonId },
             select: {
                 id: true,
                 teacherId: true,
+                group: {
+                    select: {
+                        teacherId: true,
+                    },
+                },
             },
         });
         if (!lesson) {
             throw new NotFoundException(`Lesson with ID ${dto.lessonId} not found`);
         }
-        if (lesson.teacherId !== teacherId) {
+        if (!this.isSuperAdmin(actorRole) && lesson.teacherId !== actorId) {
             throw new ForbiddenException('You can only upload videos for your own lessons');
         }
+
+        const ownerTeacherId = this.isSuperAdmin(actorRole)
+            ? (lesson.teacherId ?? lesson.group?.teacherId ?? null)
+            : actorId;
+
         return this.prisma.lessonVideo.create({
             data: {
                 lessonId: dto.lessonId,
-                teacherId,
+                teacherId: ownerTeacherId,
+                userId: this.isSuperAdmin(actorRole) ? actorId : undefined,
                 file: dto.file,
             },
         });
     }
-    async assignHomework(teacherId: number, dto: AssignHomeworkDto) {
-        await this.ensureTeacherOwnsLesson(teacherId, dto.lessonId);
+    async assignHomework(actorId: number, actorRole: Role, dto: AssignHomeworkDto) {
+        const lesson = await this.ensureLessonExists(dto.lessonId);
+
+        if (!this.isSuperAdmin(actorRole)) {
+            await this.ensureTeacherOwnsLesson(actorId, dto.lessonId);
+        }
+
         const deadlineAt = new Date(dto.deadlineAt);
         if (Number.isNaN(deadlineAt.getTime())) {
             throw new BadRequestException('Invalid deadlineAt date');
         }
+
+        const ownerTeacherId = this.isSuperAdmin(actorRole)
+            ? (lesson.teacherId ?? lesson.group?.teacherId ?? null)
+            : actorId;
+
         return this.prisma.homework.create({
             data: {
                 lessonId: dto.lessonId,
-                teacherId,
+                teacherId: ownerTeacherId,
+                userId: this.isSuperAdmin(actorRole) ? actorId : undefined,
                 title: dto.title,
                 file: dto.file,
                 durationTime: dto.durationTime,
@@ -69,8 +101,13 @@ export class ErpService {
             },
         });
     }
-    async updateHomeworkPolicy(teacherId: number, homeworkId: number, dto: UpdateHomeworkPolicyDto) {
-        await this.ensureTeacherOwnsHomework(teacherId, homeworkId);
+    async updateHomeworkPolicy(actorId: number, actorRole: Role, homeworkId: number, dto: UpdateHomeworkPolicyDto) {
+        if (!this.isSuperAdmin(actorRole)) {
+            await this.ensureTeacherOwnsHomework(actorId, homeworkId);
+        } else {
+            await this.ensureHomeworkExists(homeworkId);
+        }
+
         const updateData: Prisma.HomeworkUpdateInput = {};
         if (dto.deadlineAt) {
             const deadlineAt = new Date(dto.deadlineAt);
@@ -148,8 +185,13 @@ export class ErpService {
             },
         });
     }
-    async getHomeworkSubmissions(teacherId: number, homeworkId: number) {
-        await this.ensureTeacherOwnsHomework(teacherId, homeworkId);
+    async getHomeworkSubmissions(actorId: number, actorRole: Role, homeworkId: number) {
+        if (!this.isSuperAdmin(actorRole)) {
+            await this.ensureTeacherOwnsHomework(actorId, homeworkId);
+        } else {
+            await this.ensureHomeworkExists(homeworkId);
+        }
+
         const [responses, results] = await Promise.all([
             this.prisma.homeworkResponse.findMany({
                 where: { homeworkId },
@@ -186,8 +228,17 @@ export class ErpService {
             latestGrade: gradeByStudent.get(response.studentId) || null,
         }));
     }
-    async reviewHomework(teacherId: number, dto: ReviewHomeworkDto) {
-        await this.ensureTeacherOwnsHomework(teacherId, dto.homeworkId);
+    async reviewHomework(actorId: number, actorRole: Role, dto: ReviewHomeworkDto) {
+        let homeworkTeacherId: number | null = null;
+
+        if (!this.isSuperAdmin(actorRole)) {
+            const ownedHomework = await this.ensureTeacherOwnsHomework(actorId, dto.homeworkId);
+            homeworkTeacherId = ownedHomework.teacherId ?? null;
+        } else {
+            const homework = await this.ensureHomeworkExists(dto.homeworkId);
+            homeworkTeacherId = homework.teacherId ?? null;
+        }
+
         const latestResponse = await this.prisma.homeworkResponse.findFirst({
             where: {
                 homeworkId: dto.homeworkId,
@@ -212,7 +263,8 @@ export class ErpService {
         const resultPayload = {
             homeworkId: dto.homeworkId,
             studentId: dto.studentId,
-            teacherId,
+            teacherId: this.isSuperAdmin(actorRole) ? homeworkTeacherId : actorId,
+            userId: this.isSuperAdmin(actorRole) ? actorId : undefined,
             title: latestResponse.title,
             file: latestResponse.file,
             score: dto.score,
@@ -647,6 +699,59 @@ export class ErpService {
         if (group.teacherId !== teacherId) {
             throw new ForbiddenException('Teacher can only manage own groups');
         }
+    }
+    private async ensureGroupExists(groupId: number) {
+        const group = await this.prisma.group.findUnique({
+            where: { id: groupId },
+            select: {
+                id: true,
+                teacherId: true,
+            },
+        });
+
+        if (!group) {
+            throw new NotFoundException(`Group with ID ${groupId} not found`);
+        }
+
+        return group;
+    }
+    private async ensureLessonExists(lessonId: number) {
+        const lesson = await this.prisma.lesson.findUnique({
+            where: { id: lessonId },
+            select: {
+                id: true,
+                teacherId: true,
+                group: {
+                    select: {
+                        teacherId: true,
+                    },
+                },
+            },
+        });
+
+        if (!lesson) {
+            throw new NotFoundException(`Lesson with ID ${lessonId} not found`);
+        }
+
+        return lesson;
+    }
+    private async ensureHomeworkExists(homeworkId: number) {
+        const homework = await this.prisma.homework.findUnique({
+            where: { id: homeworkId },
+            select: {
+                id: true,
+                teacherId: true,
+            },
+        });
+
+        if (!homework) {
+            throw new NotFoundException(`Homework with ID ${homeworkId} not found`);
+        }
+
+        return homework;
+    }
+    private isSuperAdmin(role: Role) {
+        return role === Role.SUPERADMIN;
     }
     private async ensureStudentExists(studentId: number) {
         const student = await this.prisma.student.findUnique({

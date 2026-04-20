@@ -420,7 +420,7 @@ export class AuthService {
                 }
 
                 if (typeof dto.photo === 'string') {
-                    updateData.photo = dto.photo.trim() || null;
+                    updateData.photo = this.normalizeProfilePhoto(dto.photo);
                 }
 
                 if (typeof dto.phone === 'string') {
@@ -473,7 +473,7 @@ export class AuthService {
                 }
 
                 if (typeof dto.photo === 'string') {
-                    updateData.photo = dto.photo.trim() || null;
+                    updateData.photo = this.normalizeProfilePhoto(dto.photo);
                 }
 
                 if (typeof dto.phone === 'string') {
@@ -519,7 +519,7 @@ export class AuthService {
                 }
 
                 if (typeof dto.photo === 'string') {
-                    updateData.photo = dto.photo.trim() || null;
+                    updateData.photo = this.normalizeProfilePhoto(dto.photo);
                 }
 
                 if (typeof dto.phone === 'string') {
@@ -1267,6 +1267,37 @@ export class AuthService {
 
         const trimmed = value.trim();
         return trimmed || null;
+    }
+
+    private normalizeProfilePhoto(value: string): string | null {
+        const trimmed = String(value || '').trim();
+        if (!trimmed) {
+            return null;
+        }
+
+        if (!this.isSupportedProfilePhotoValue(trimmed)) {
+            throw new BadRequestException('Profil rasmi faqat JPG yoki PNG bo\'lishi kerak');
+        }
+
+        return trimmed;
+    }
+
+    private isSupportedProfilePhotoValue(value: string): boolean {
+        if (/^data:/i.test(value)) {
+            return /^data:image\/(jpeg|png);base64,/i.test(value);
+        }
+
+        try {
+            const parsed = new URL(value, 'http://local');
+            const pathname = String(parsed.pathname || '').toLowerCase();
+            return (
+                pathname.endsWith('.jpg')
+                || pathname.endsWith('.jpeg')
+                || pathname.endsWith('.png')
+            );
+        } catch {
+            return false;
+        }
     }
 
     private maskContact(channel: OtpChannel, destination: string): string {

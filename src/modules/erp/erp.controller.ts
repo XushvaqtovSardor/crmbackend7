@@ -82,33 +82,28 @@ function buildVideoFileName(originalName: string) {
 
 function resolveImageExtension(originalName: string, mimeType?: string) {
     const extension = extname(String(originalName || '')).toLowerCase();
-    if (extension && /^[a-z0-9.]+$/.test(extension)) {
+    if (extension === '.jpg' || extension === '.jpeg' || extension === '.png') {
         return extension;
     }
 
     const normalizedMime = String(mimeType || '').toLowerCase();
     if (normalizedMime === 'image/png') return '.png';
-    if (normalizedMime === 'image/webp') return '.webp';
-    if (normalizedMime === 'image/gif') return '.gif';
-    if (normalizedMime === 'image/svg+xml') return '.svg';
+    if (normalizedMime === 'image/jpeg') return '.jpg';
 
-    return '.jpg';
+    return '';
 }
 
 function isSupportedImageFile(file: { mimetype?: string; originalname?: string }) {
     const mimeType = String(file.mimetype || '').toLowerCase();
-    if (!mimeType.startsWith('image/')) {
-        return false;
-    }
-
     const extension = resolveImageExtension(file.originalname || '', mimeType);
-    return ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg'].includes(
-        extension,
-    );
+    const mimeAllowed = mimeType === 'image/jpeg' || mimeType === 'image/png';
+    const extensionAllowed = extension === '.jpg' || extension === '.jpeg' || extension === '.png';
+
+    return mimeAllowed || extensionAllowed;
 }
 
 function buildImageFileName(originalName: string, mimeType?: string) {
-    const extension = resolveImageExtension(originalName, mimeType);
+    const extension = resolveImageExtension(originalName, mimeType) || '.jpg';
     const random = Math.random().toString(36).slice(2, 10);
     return `${Date.now()}-${random}${extension}`;
 }
@@ -147,33 +142,43 @@ export class ErpController {
     constructor(private readonly erpService: ErpService) { }
 
     @Post('teacher/lessons')
-    @Roles(Role.TEACHER)
+    @Roles(Role.TEACHER, Role.SUPERADMIN)
     @ApiOperation({ summary: 'Teacher creates lesson' })
     @ApiBody({ type: CreateLessonDto })
     @ApiResponse({ status: 201, description: 'Lesson created' })
     @ApiResponse({ status: 403, description: 'Not allowed for this teacher' })
     createLesson(
         @Headers('x-user-id') teacherId: string,
+        @Headers('x-user-role') actorRole: string,
         @Body() dto: CreateLessonDto,
     ) {
-        return this.erpService.createLesson(this.parseUserId(teacherId), dto);
+        return this.erpService.createLesson(
+            this.parseUserId(teacherId),
+            this.parseRole(actorRole),
+            dto,
+        );
     }
 
     @Post('teacher/videos')
-    @Roles(Role.TEACHER)
+    @Roles(Role.TEACHER, Role.SUPERADMIN)
     @ApiOperation({ summary: 'Teacher uploads lesson video' })
     @ApiBody({ type: PublishVideoDto })
     @ApiResponse({ status: 201, description: 'Video published' })
     @ApiResponse({ status: 404, description: 'Lesson not found' })
     publishVideo(
         @Headers('x-user-id') teacherId: string,
+        @Headers('x-user-role') actorRole: string,
         @Body() dto: PublishVideoDto,
     ) {
-        return this.erpService.publishVideo(this.parseUserId(teacherId), dto);
+        return this.erpService.publishVideo(
+            this.parseUserId(teacherId),
+            this.parseRole(actorRole),
+            dto,
+        );
     }
 
     @Post('teacher/videos/upload')
-    @Roles(Role.TEACHER)
+    @Roles(Role.TEACHER, Role.SUPERADMIN)
     @UseInterceptors(
         FileInterceptor('file', {
             storage: diskStorage({
@@ -272,7 +277,7 @@ export class ErpController {
                 if (!isSupportedImageFile(file)) {
                     callback(
                         new BadRequestException(
-                            'Faqat rasm fayllar qabul qilinadi',
+                            'Faqat JPG yoki PNG rasm fayllari qabul qilinadi',
                         ),
                         false,
                     );
@@ -320,20 +325,25 @@ export class ErpController {
     }
 
     @Post('teacher/homeworks')
-    @Roles(Role.TEACHER)
+    @Roles(Role.TEACHER, Role.SUPERADMIN)
     @ApiOperation({ summary: 'Teacher assigns homework' })
     @ApiBody({ type: AssignHomeworkDto })
     @ApiResponse({ status: 201, description: 'Homework assigned' })
     @ApiResponse({ status: 400, description: 'Validation error' })
     assignHomework(
         @Headers('x-user-id') teacherId: string,
+        @Headers('x-user-role') actorRole: string,
         @Body() dto: AssignHomeworkDto,
     ) {
-        return this.erpService.assignHomework(this.parseUserId(teacherId), dto);
+        return this.erpService.assignHomework(
+            this.parseUserId(teacherId),
+            this.parseRole(actorRole),
+            dto,
+        );
     }
 
     @Patch('teacher/homeworks/:homeworkId/policy')
-    @Roles(Role.TEACHER)
+    @Roles(Role.TEACHER, Role.SUPERADMIN)
     @ApiOperation({ summary: 'Teacher updates homework policy' })
     @ApiParam({ name: 'homeworkId', type: Number, example: 1 })
     @ApiBody({ type: UpdateHomeworkPolicyDto })
@@ -341,42 +351,51 @@ export class ErpController {
     @ApiResponse({ status: 404, description: 'Homework not found' })
     updateHomeworkPolicy(
         @Headers('x-user-id') teacherId: string,
+        @Headers('x-user-role') actorRole: string,
         @Param('homeworkId', ParseIntPipe) homeworkId: number,
         @Body() dto: UpdateHomeworkPolicyDto,
     ) {
         return this.erpService.updateHomeworkPolicy(
             this.parseUserId(teacherId),
+            this.parseRole(actorRole),
             homeworkId,
             dto,
         );
     }
 
     @Get('teacher/homeworks/:homeworkId/submissions')
-    @Roles(Role.TEACHER)
+    @Roles(Role.TEACHER, Role.SUPERADMIN)
     @ApiOperation({ summary: 'Teacher gets homework submissions' })
     @ApiParam({ name: 'homeworkId', type: Number, example: 1 })
     @ApiResponse({ status: 200, description: 'Submission list returned' })
     getHomeworkSubmissions(
         @Headers('x-user-id') teacherId: string,
+        @Headers('x-user-role') actorRole: string,
         @Param('homeworkId', ParseIntPipe) homeworkId: number,
     ) {
         return this.erpService.getHomeworkSubmissions(
             this.parseUserId(teacherId),
+            this.parseRole(actorRole),
             homeworkId,
         );
     }
 
     @Post('teacher/homeworks/review')
-    @Roles(Role.TEACHER)
+    @Roles(Role.TEACHER, Role.SUPERADMIN)
     @ApiOperation({ summary: 'Teacher reviews homework result' })
     @ApiBody({ type: ReviewHomeworkDto })
     @ApiResponse({ status: 201, description: 'Homework reviewed' })
     @ApiResponse({ status: 404, description: 'Submission not found' })
     reviewHomework(
         @Headers('x-user-id') teacherId: string,
+        @Headers('x-user-role') actorRole: string,
         @Body() dto: ReviewHomeworkDto,
     ) {
-        return this.erpService.reviewHomework(this.parseUserId(teacherId), dto);
+        return this.erpService.reviewHomework(
+            this.parseUserId(teacherId),
+            this.parseRole(actorRole),
+            dto,
+        );
     }
 
     @Get('teacher/dashboard')
@@ -449,5 +468,14 @@ export class ErpController {
         }
 
         return parsed;
+    }
+
+    private parseRole(rawRole: string): Role {
+        const normalized = String(rawRole || '').trim().toUpperCase();
+        if (!Object.values(Role).includes(normalized as Role)) {
+            throw new BadRequestException('x-user-role header is invalid');
+        }
+
+        return normalized as Role;
     }
 }

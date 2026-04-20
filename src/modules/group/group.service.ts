@@ -195,19 +195,21 @@ export class GroupService {
     }
     async findMyGroups(userId: number, rawRole: string) {
         const role = String(rawRole || '').trim().toUpperCase() as Role;
-        if (role !== Role.TEACHER && role !== Role.STUDENT) {
-            throw new ForbiddenException('Only teacher or student can access this endpoint');
+        if (role !== Role.TEACHER && role !== Role.STUDENT && role !== Role.SUPERADMIN) {
+            throw new ForbiddenException('Only teacher, student or superadmin can access this endpoint');
         }
-        const where = role === Role.TEACHER
-            ? { teacherId: userId }
-            : {
-                studentGroup: {
-                    some: {
-                        studentId: userId,
-                        status: Status.ACTIVE,
+        const where = role === Role.SUPERADMIN
+            ? {}
+            : role === Role.TEACHER
+                ? { teacherId: userId }
+                : {
+                    studentGroup: {
+                        some: {
+                            studentId: userId,
+                            status: Status.ACTIVE,
+                        },
                     },
-                },
-            };
+                };
         return this.prisma.group.findMany({
             where,
             orderBy: { created_at: 'desc' },
