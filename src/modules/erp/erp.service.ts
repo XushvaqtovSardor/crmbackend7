@@ -63,10 +63,6 @@ export class ErpService {
             throw new ForbiddenException('You can only upload videos for your own lessons');
         }
 
-        if (!this.isValidVideoAttachment(dto.file)) {
-            throw new BadRequestException('Video uchun faqat video fayl yoki video link biriktirilishi mumkin');
-        }
-
         const ownerTeacherId = this.isSuperAdmin(actorRole)
             ? (lesson.teacherId ?? lesson.group?.teacherId ?? null)
             : actorId;
@@ -1073,62 +1069,6 @@ export class ErpService {
     }
     private isSuperAdmin(role: Role) {
         return role === Role.SUPERADMIN;
-    }
-
-    private isValidVideoAttachment(value: string) {
-        const raw = String(value || '').trim();
-        if (!raw) return false;
-
-        const parsed = this.parseAttachment(raw);
-        const candidates = [parsed.link, parsed.fileName, raw]
-            .map((item) => String(item || '').trim())
-            .filter(Boolean);
-
-        return candidates.some((item) => this.isVideoSource(item));
-    }
-
-    private parseAttachment(value: string) {
-        const raw = String(value || '').trim();
-
-        if (!raw || !raw.startsWith('{')) {
-            return {
-                fileName: '',
-                link: '',
-            };
-        }
-
-        try {
-            const parsed = JSON.parse(raw) as {
-                type?: string;
-                fileName?: string;
-                link?: string;
-            };
-
-            if (parsed?.type !== 'attachment-v1') {
-                return {
-                    fileName: '',
-                    link: '',
-                };
-            }
-
-            return {
-                fileName: String(parsed.fileName || '').trim(),
-                link: String(parsed.link || '').trim(),
-            };
-        } catch {
-            return {
-                fileName: '',
-                link: '',
-            };
-        }
-    }
-
-    private isVideoSource(source: string) {
-        const normalized = String(source || '').trim().toLowerCase();
-        if (!normalized) return false;
-
-        const withoutQuery = normalized.split('?')[0];
-        return /(\.mp4|\.webm|\.mov|\.m4v|\.avi|\.mkv|\.ogg)$/.test(withoutQuery);
     }
 
     private async ensureStudentExists(studentId: number) {

@@ -39,6 +39,9 @@ import { UpdateHomeworkCoinPoliciesDto } from './dto/update-homework-coin-polici
 import { ErpService } from './erp.service';
 
 const VIDEO_UPLOAD_DIR = join(process.cwd(), 'uploads', 'lesson-videos');
+const VIDEO_UPLOAD_MAX_SIZE =
+    Number.parseInt(process.env.VIDEO_UPLOAD_MAX_SIZE || '', 10) ||
+    500 * 1024 * 1024;
 const HOMEWORK_UPLOAD_DIR = join(process.cwd(), 'uploads', 'homework-files');
 const HOMEWORK_UPLOAD_MAX_SIZE =
     Number.parseInt(process.env.HOMEWORK_UPLOAD_MAX_SIZE || '', 10) ||
@@ -237,6 +240,9 @@ export class ErpController {
                     callback(null, buildVideoFileName(file.originalname));
                 },
             }),
+            limits: {
+                fileSize: VIDEO_UPLOAD_MAX_SIZE,
+            },
         }),
     )
     @ApiOperation({

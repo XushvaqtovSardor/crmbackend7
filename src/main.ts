@@ -31,10 +31,17 @@ async function bootstrap() {
   expressApp.set('trust proxy', 1);
   expressApp.use('/uploads', expressStatic(join(process.cwd(), 'uploads')));
 
+  const defaultFrontendOrigins = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://www.lurnex.tech',
+    'https://lurnex.tech',
+  ].join(',');
+
   const allowedOrigins = (
     process.env.FRONTEND_URLS ||
     process.env.FRONTEND_URL ||
-    'http://localhost:5173'
+    defaultFrontendOrigins
   )
     .split(',')
     .map((origin) => normalizeOrigin(origin.trim()))
@@ -77,7 +84,7 @@ async function bootstrap() {
       }),
     );
 
-    const bodyLimit = process.env.BODY_LIMIT || '300kb';
+    const bodyLimit = process.env.BODY_LIMIT || '10mb';
 
     app.use(json({ limit: bodyLimit }));
     app.use(urlencoded({ extended: true, limit: bodyLimit }));

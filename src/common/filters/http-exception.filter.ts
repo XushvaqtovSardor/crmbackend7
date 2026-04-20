@@ -1,5 +1,6 @@
 import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus, Logger, } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { MulterError } from 'multer';
 import { Prisma } from '@prisma/client';
 type HttpExceptionPayload = {
     message?: string | string[];
@@ -26,6 +27,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
             status = prismaError.statusCode;
             message = prismaError.message;
             error = prismaError.error;
+        }
+        else if (this.isPayloadTooLargeError(exception)) {
+            const payloadError = this.handlePayloadTooLargeError(exception);
+            status = payloadError.statusCode;
+            message = payloadError.message;
+            error = payloadError.error;
         }
         else if (exception instanceof Error) {
             message = exception.message;
@@ -92,5 +99,49 @@ export class AllExceptionsFilter implements ExceptionFilter {
                     error: 'Bad Request',
                 };
         }
+    }
+
+    private isPayloadTooLargeError(exception: unknown) {
+        if (exception instanceof MulterError && exception.code === 'LIMIT_FILE_SIZE') {
+            return true;
+        }
+
+        if (!(exception instanceof Error)) {
+            return false;
+        }
+
+        const maybeRequestSizeError = exception as Error & {
+            status?: number;
+            statusCode?: number;
+            type?: string;
+            code?: string;
+        };
+
+        return (
+            maybeRequestSizeError.status === HttpStatus.PAYLOAD_TOO_LARGE ||
+            maybeRequestSizeError.statusCode === HttpStatus.PAYLOAD_TOO_LARGE ||
+            maybeRequestSizeError.type === 'entity.too.large' ||
+            maybeRequestSizeError.code === 'LIMIT_FILE_SIZE'
+        );
+    }
+
+    private handlePayloadTooLargeError(exception: unknown) {
+        if (exception instanceof MulterError && exception.code === 'LIMIT_FILE_SIZE') {
+            return {
+                statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
+                message: 'Yuklanayotgan fayl hajmi ruxsat etilgan limitdan katta',
+                error: 'Payload Too Large',
+            };
+        }
+
+        const payloadError = exception as Error & { message?: string };
+
+        return {
+            statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
+            message:
+                payloadError.message ||
+                "So'rov hajmi ruxsat etilgan limitdan katta",
+            error: 'Payload Too Large',
+        };
     }
 }
