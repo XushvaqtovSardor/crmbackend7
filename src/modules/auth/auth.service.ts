@@ -27,6 +27,11 @@ import { VerificationEmailService } from '../../verification/verificationEmail.s
 const INVALID_CREDENTIALS_MESSAGE = "Email/phone yoki parol noto'g'ri";
 const REGISTER_OTP_KEY_PREFIX = 'auth:register:otp';
 const OTP_DEBUG_FALLBACK_ENABLED = true;
+const STAFF_CREATION_ROLES = new Set<Role>([
+    Role.ADMIN,
+    Role.MANAGEMENT,
+    Role.ADMINSTRATOR,
+]);
 
 type JwtPayload = {
     sub: number;
@@ -255,8 +260,10 @@ export class AuthService {
 
         const actor = this.verifyAccessToken(token);
         if (actor.role !== Role.SUPERADMIN) {
-            throw new ForbiddenException('Only SUPERADMIN can create ADMIN');
+            throw new ForbiddenException('Only SUPERADMIN can create staff');
         }
+
+        const targetRole = this.resolveStaffRole(dto.role);
 
         const fullName = String(dto.fullName || '').trim();
         if (!fullName) {
@@ -265,7 +272,7 @@ export class AuthService {
 
         const phone = this.normalizePhoneValue(dto.phone);
         if (!phone) {
-            throw new BadRequestException('phone is required for admin creation');
+            throw new BadRequestException('phone is required for staff creation');
         }
 
         const contacts = this.normalizeRegistrationContacts(dto.email, phone, 'admin');
@@ -276,9 +283,15 @@ export class AuthService {
             email: contacts.email,
             phone: contacts.phone,
             password: dto.password,
-            role: Role.ADMIN,
-            position: this.trimOptionalString(dto.position) || 'Administrator',
+            role: targetRole,
+            position: this.trimOptionalString(dto.position) || this.resolveDefaultStaffPosition(targetRole),
         });
+
+        const notificationAccountType = targetRole === Role.MANAGEMENT
+            ? 'MANAGEMENT'
+            : targetRole === Role.ADMINSTRATOR
+                ? 'ADMINSTRATOR'
+                : 'ADMIN';
 
         await this.notificationService.sendCredentials({
             toEmail: contacts.email,
@@ -286,12 +299,51 @@ export class AuthService {
             fullName,
             login: contacts.phone || contacts.email,
             password: dto.password,
-            accountType: 'ADMIN',
+            accountType: notificationAccountType,
         });
 
         return {
-            message: 'ADMIN created successfully',
+            message: `${targetRole} created successfully`,
             user: this.toUserPayload(principal),
+        };
+    }
+
+    async listStaff(authHeader: string) {
+        const token = this.extractBearerToken(authHeader);
+        if (!token) {
+            throw new UnauthorizedException('Authorization header with Bearer token is required');
+        }
+
+        const actor = this.verifyAccessToken(token);
+        if (actor.role !== Role.SUPERADMIN) {
+            throw new ForbiddenException('Only SUPERADMIN can view staff list');
+        }
+
+        const data = await this.prisma.user.findMany({
+            where: {
+                role: {
+                    in: Array.from(STAFF_CREATION_ROLES),
+                },
+            },
+            orderBy: {
+                created_at: 'desc',
+            },
+            select: {
+                id: true,
+                fullName: true,
+                email: true,
+                phone: true,
+                role: true,
+                position: true,
+                status: true,
+                photo: true,
+                created_at: true,
+            },
+        });
+
+        return {
+            data,
+            total: data.length,
         };
     }
 
@@ -1267,6 +1319,33 @@ export class AuthService {
 
         const trimmed = value.trim();
         return trimmed || null;
+    }
+
+    private resolveStaffRole(rawRole?: Role): Role {
+        if (!rawRole) {
+            return Role.ADMIN;
+        }
+
+        const normalized = String(rawRole || '').trim().toUpperCase() as Role;
+        if (!STAFF_CREATION_ROLES.has(normalized)) {
+            throw new BadRequestException(
+                'Staff role faqat ADMIN, MANAGEMENT yoki ADMINSTRATOR bo\'lishi mumkin',
+            );
+        }
+
+        return normalized;
+    }
+
+    private resolveDefaultStaffPosition(role: Role): string {
+        if (role === Role.MANAGEMENT) {
+            return 'Management';
+        }
+
+        if (role === Role.ADMINSTRATOR) {
+            return 'Administrator Staff';
+        }
+
+        return 'Administrator';
     }
 
     private normalizeProfilePhoto(value: string): string | null {

@@ -41,6 +41,10 @@ const VIDEO_UPLOAD_DIR = join(process.cwd(), 'uploads', 'lesson-videos');
 const VIDEO_UPLOAD_MAX_SIZE =
     Number.parseInt(process.env.VIDEO_UPLOAD_MAX_SIZE || '', 10) ||
     250 * 1024 * 1024;
+const HOMEWORK_UPLOAD_DIR = join(process.cwd(), 'uploads', 'homework-files');
+const HOMEWORK_UPLOAD_MAX_SIZE =
+    Number.parseInt(process.env.HOMEWORK_UPLOAD_MAX_SIZE || '', 10) ||
+    50 * 1024 * 1024;
 const IMAGE_UPLOAD_DIR = join(process.cwd(), 'uploads', 'profile-images');
 const IMAGE_UPLOAD_MAX_SIZE =
     Number.parseInt(process.env.IMAGE_UPLOAD_MAX_SIZE || '', 10) ||
@@ -48,6 +52,10 @@ const IMAGE_UPLOAD_MAX_SIZE =
 
 function ensureVideoUploadDir() {
     mkdirSync(VIDEO_UPLOAD_DIR, { recursive: true });
+}
+
+function ensureHomeworkUploadDir() {
+    mkdirSync(HOMEWORK_UPLOAD_DIR, { recursive: true });
 }
 
 function ensureImageUploadDir() {
@@ -76,6 +84,65 @@ function isSupportedVideoFile(file: { mimetype?: string; originalname?: string }
 
 function buildVideoFileName(originalName: string) {
     const extension = resolveVideoExtension(originalName);
+    const random = Math.random().toString(36).slice(2, 10);
+    return `${Date.now()}-${random}${extension}`;
+}
+
+function resolveHomeworkExtension(originalName: string, mimeType?: string) {
+    const extension = extname(String(originalName || '')).toLowerCase();
+    const supportedExtensions = new Set([
+        '.pdf',
+        '.doc',
+        '.docx',
+        '.xls',
+        '.xlsx',
+        '.ppt',
+        '.pptx',
+        '.txt',
+        '.zip',
+        '.rar',
+        '.7z',
+        '.jpg',
+        '.jpeg',
+        '.png',
+        '.mp4',
+        '.webm',
+        '.mov',
+        '.avi',
+        '.mkv',
+    ]);
+
+    if (supportedExtensions.has(extension)) {
+        return extension;
+    }
+
+    const normalizedMime = String(mimeType || '').toLowerCase();
+    if (normalizedMime === 'application/pdf') return '.pdf';
+    if (normalizedMime === 'application/msword') return '.doc';
+    if (normalizedMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return '.docx';
+    if (normalizedMime === 'application/vnd.ms-excel') return '.xls';
+    if (normalizedMime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return '.xlsx';
+    if (normalizedMime === 'application/vnd.ms-powerpoint') return '.ppt';
+    if (normalizedMime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') return '.pptx';
+    if (normalizedMime === 'text/plain') return '.txt';
+    if (normalizedMime === 'application/zip') return '.zip';
+    if (normalizedMime === 'application/x-rar-compressed') return '.rar';
+    if (normalizedMime === 'application/x-7z-compressed') return '.7z';
+    if (normalizedMime === 'image/jpeg') return '.jpg';
+    if (normalizedMime === 'image/png') return '.png';
+    if (normalizedMime.startsWith('video/')) return '.mp4';
+
+    return '';
+}
+
+function isSupportedHomeworkFile(file: { mimetype?: string; originalname?: string }) {
+    const mimeType = String(file.mimetype || '').toLowerCase();
+    const extension = resolveHomeworkExtension(file.originalname || '', mimeType);
+    return Boolean(extension);
+}
+
+function buildHomeworkFileName(originalName: string, mimeType?: string) {
+    const extension = resolveHomeworkExtension(originalName, mimeType) || '.bin';
     const random = Math.random().toString(36).slice(2, 10);
     return `${Date.now()}-${random}${extension}`;
 }
@@ -237,6 +304,79 @@ export class ErpController {
         }
 
         const relativeUrl = `/uploads/lesson-videos/${file.filename}`;
+
+        return {
+            fileName: file.originalname,
+            relativeUrl,
+            url: buildPublicFileUrl(req, relativeUrl),
+            mimeType: file.mimetype,
+            size: file.size,
+        };
+    }
+
+    @Post('teacher/homeworks/upload')
+    @Roles(Role.TEACHER, Role.SUPERADMIN)
+    @UseInterceptors(
+        FileInterceptor('file', {
+            storage: diskStorage({
+                destination: (_req, _file, callback) => {
+                    ensureHomeworkUploadDir();
+                    callback(null, HOMEWORK_UPLOAD_DIR);
+                },
+                filename: (_req, file, callback) => {
+                    callback(
+                        null,
+                        buildHomeworkFileName(file.originalname, file.mimetype),
+                    );
+                },
+            }),
+            limits: {
+                fileSize: HOMEWORK_UPLOAD_MAX_SIZE,
+            },
+            fileFilter: (_req, file, callback) => {
+                if (!isSupportedHomeworkFile(file)) {
+                    callback(
+                        new BadRequestException(
+                            'Faqat qo\'llab-quvvatlanadigan fayllar qabul qilinadi (pdf/doc/docx/xls/xlsx/ppt/pptx/txt/zip/rar/7z/jpg/png/video)',
+                        ),
+                        false,
+                    );
+                    return;
+                }
+
+                callback(null, true);
+            },
+        }),
+    )
+    @ApiOperation({
+        summary: 'Teacher uploads homework attachment and receives public URL',
+    })
+    @ApiConsumes('multipart/form-data')
+    @ApiBody({
+        schema: {
+            type: 'object',
+            properties: {
+                file: {
+                    type: 'string',
+                    format: 'binary',
+                },
+            },
+            required: ['file'],
+        },
+    })
+    @ApiResponse({ status: 201, description: 'Homework attachment uploaded' })
+    uploadHomeworkAttachment(
+        @Headers('x-user-id') teacherId: string,
+        @UploadedFile() file: Express.Multer.File,
+        @Req() req: Request,
+    ) {
+        this.parseUserId(teacherId);
+
+        if (!file) {
+            throw new BadRequestException('Homework fayli topilmadi');
+        }
+
+        const relativeUrl = `/uploads/homework-files/${file.filename}`;
 
         return {
             fileName: file.originalname,

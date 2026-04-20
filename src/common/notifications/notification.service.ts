@@ -13,7 +13,7 @@ type CredentialsPayload = {
     fullName: string;
     login: string;
     password: string;
-    accountType: 'TEACHER' | 'STUDENT' | 'ADMIN';
+    accountType: 'TEACHER' | 'STUDENT' | 'ADMIN' | 'MANAGEMENT' | 'ADMINSTRATOR';
 };
 
 @Injectable()

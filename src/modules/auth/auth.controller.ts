@@ -47,15 +47,25 @@ export class AuthController {
     @Post('admins')
     @HttpCode(HttpStatus.CREATED)
     @ApiBearerAuth('access-token')
-    @ApiOperation({ summary: 'Create a new ADMIN (only authenticated SUPERADMIN can do this)' })
+    @ApiOperation({ summary: 'Create a new staff account (ADMIN/MANAGEMENT/ADMINSTRATOR) by SUPERADMIN' })
     @ApiBody({ type: RegisterAdminDto })
-    @ApiResponse({ status: 201, description: 'Admin created' })
-    @ApiResponse({ status: 403, description: 'Only superadmin can create admin' })
+    @ApiResponse({ status: 201, description: 'Staff account created' })
+    @ApiResponse({ status: 403, description: 'Only superadmin can create staff' })
     createAdmin(
         @Headers('authorization') authHeader: string,
         @Body() dto: RegisterAdminDto,
     ) {
         return this.authService.createAdmin(authHeader, dto);
+    }
+
+    @Get('staff')
+    @HttpCode(HttpStatus.OK)
+    @ApiBearerAuth('access-token')
+    @ApiOperation({ summary: 'List staff users (ADMIN/MANAGEMENT/ADMINSTRATOR) for SUPERADMIN' })
+    @ApiResponse({ status: 200, description: 'Staff list returned' })
+    @ApiResponse({ status: 403, description: 'Only superadmin can view staff list' })
+    listStaff(@Headers('authorization') authHeader: string) {
+        return this.authService.listStaff(authHeader);
     }
 
     @Post('superadmins')
