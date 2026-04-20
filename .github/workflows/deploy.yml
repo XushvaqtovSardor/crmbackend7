@@ -50,9 +50,7 @@ jobs:
 
             if command -v nginx >/dev/null 2>&1; then
               echo "Applying Nginx upload size limit for large lesson videos"
-              cat > /etc/nginx/conf.d/erp-upload-limit.conf <<'EOF'
-client_max_body_size 600M;
-EOF
+              printf 'client_max_body_size 600M;\n' > /etc/nginx/conf.d/erp-upload-limit.conf
 
               nginx -t
               if command -v systemctl >/dev/null 2>&1; then
