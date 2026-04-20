@@ -13,6 +13,14 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 const API_PREFIX = 'api/v1';
 const logger = new Logger('Bootstrap');
 
+function normalizeOrigin(value: string) {
+  try {
+    return new URL(value).origin.toLowerCase();
+  } catch {
+    return value.replace(/\/+$/, '').toLowerCase();
+  }
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
@@ -29,15 +37,17 @@ async function bootstrap() {
     'http://localhost:5173'
   )
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => normalizeOrigin(origin.trim()))
     .filter(Boolean);
 
   app.enableCors({
     origin: (origin, callback) => {
+      const normalizedOrigin = origin ? normalizeOrigin(origin) : '';
+
       if (
         !origin ||
         allowedOrigins.includes('*') ||
-        allowedOrigins.includes(origin)
+        allowedOrigins.includes(normalizedOrigin)
       ) {
         callback(null, true);
         return;
@@ -175,7 +185,7 @@ async function bootstrap() {
   const server = app.getHttpServer();
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
-  server.requestTimeout = Number(process.env.REQUEST_TIMEOUT_MS ?? 15000);
+  server.requestTimeout = Number(process.env.REQUEST_TIMEOUT_MS ?? 1800000);
 
   const appUrl = await app.getUrl();
   const appBase = `${appUrl.replace(/\/$/, '')}/${API_PREFIX}`;

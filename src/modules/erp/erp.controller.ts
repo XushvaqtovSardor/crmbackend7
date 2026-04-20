@@ -39,9 +39,6 @@ import { UpdateHomeworkCoinPoliciesDto } from './dto/update-homework-coin-polici
 import { ErpService } from './erp.service';
 
 const VIDEO_UPLOAD_DIR = join(process.cwd(), 'uploads', 'lesson-videos');
-const VIDEO_UPLOAD_MAX_SIZE =
-    Number.parseInt(process.env.VIDEO_UPLOAD_MAX_SIZE || '', 10) ||
-    250 * 1024 * 1024;
 const HOMEWORK_UPLOAD_DIR = join(process.cwd(), 'uploads', 'homework-files');
 const HOMEWORK_UPLOAD_MAX_SIZE =
     Number.parseInt(process.env.HOMEWORK_UPLOAD_MAX_SIZE || '', 10) ||
@@ -68,19 +65,7 @@ function resolveVideoExtension(originalName: string) {
     if (extension && /^[a-z0-9.]+$/.test(extension)) {
         return extension;
     }
-    return '.mp4';
-}
-
-function isSupportedVideoFile(file: { mimetype?: string; originalname?: string }) {
-    const mimeType = String(file.mimetype || '').toLowerCase();
-    if (mimeType.startsWith('video/')) {
-        return true;
-    }
-
-    const extension = resolveVideoExtension(file.originalname || '');
-    return ['.mp4', '.webm', '.mov', '.m4v', '.avi', '.mkv', '.ogg'].includes(
-        extension,
-    );
+    return '.bin';
 }
 
 function buildVideoFileName(originalName: string) {
@@ -252,22 +237,6 @@ export class ErpController {
                     callback(null, buildVideoFileName(file.originalname));
                 },
             }),
-            limits: {
-                fileSize: VIDEO_UPLOAD_MAX_SIZE,
-            },
-            fileFilter: (_req, file, callback) => {
-                if (!isSupportedVideoFile(file)) {
-                    callback(
-                        new BadRequestException(
-                            'Faqat video fayllar qabul qilinadi',
-                        ),
-                        false,
-                    );
-                    return;
-                }
-
-                callback(null, true);
-            },
         }),
     )
     @ApiOperation({
