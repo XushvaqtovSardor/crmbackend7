@@ -35,6 +35,7 @@ import { PublishVideoDto } from './dto/publish-video.dto';
 import { ReviewHomeworkDto } from './dto/review-homework.dto';
 import { SubmitHomeworkDto } from './dto/submit-homework.dto';
 import { UpdateHomeworkPolicyDto } from './dto/update-homework-policy.dto';
+import { UpdateHomeworkCoinPoliciesDto } from './dto/update-homework-coin-policies.dto';
 import { ErpService } from './erp.service';
 
 const VIDEO_UPLOAD_DIR = join(process.cwd(), 'uploads', 'lesson-videos');
@@ -105,11 +106,6 @@ function resolveHomeworkExtension(originalName: string, mimeType?: string) {
         '.jpg',
         '.jpeg',
         '.png',
-        '.mp4',
-        '.webm',
-        '.mov',
-        '.avi',
-        '.mkv',
     ]);
 
     if (supportedExtensions.has(extension)) {
@@ -130,7 +126,6 @@ function resolveHomeworkExtension(originalName: string, mimeType?: string) {
     if (normalizedMime === 'application/x-7z-compressed') return '.7z';
     if (normalizedMime === 'image/jpeg') return '.jpg';
     if (normalizedMime === 'image/png') return '.png';
-    if (normalizedMime.startsWith('video/')) return '.mp4';
 
     return '';
 }
@@ -337,7 +332,7 @@ export class ErpController {
                 if (!isSupportedHomeworkFile(file)) {
                     callback(
                         new BadRequestException(
-                            'Faqat qo\'llab-quvvatlanadigan fayllar qabul qilinadi (pdf/doc/docx/xls/xlsx/ppt/pptx/txt/zip/rar/7z/jpg/png/video)',
+                            'Faqat qo\'llab-quvvatlanadigan fayllar qabul qilinadi (pdf/doc/docx/xls/xlsx/ppt/pptx/txt/zip/rar/7z/jpg/png)',
                         ),
                         false,
                     );
@@ -597,6 +592,29 @@ export class ErpController {
     @ApiResponse({ status: 200, description: 'Analytics returned' })
     getSuperAdminAnalytics() {
         return this.erpService.getSuperAdminAnalytics();
+    }
+
+    @Get('superadmin/homework-coin-policies')
+    @Roles(Role.SUPERADMIN)
+    @ApiOperation({ summary: 'Get homework coin policies for standard and bootcamp tracks' })
+    @ApiResponse({ status: 200, description: 'Homework coin policies returned' })
+    getHomeworkCoinPolicies() {
+        return this.erpService.getHomeworkCoinPolicies();
+    }
+
+    @Patch('superadmin/homework-coin-policies')
+    @Roles(Role.SUPERADMIN)
+    @ApiOperation({ summary: 'Update homework coin policies for standard and bootcamp tracks' })
+    @ApiBody({ type: UpdateHomeworkCoinPoliciesDto })
+    @ApiResponse({ status: 200, description: 'Homework coin policies updated' })
+    updateHomeworkCoinPolicies(
+        @Headers('x-user-id') actorId: string,
+        @Body() dto: UpdateHomeworkCoinPoliciesDto,
+    ) {
+        return this.erpService.updateHomeworkCoinPolicies(
+            this.parseUserId(actorId),
+            dto,
+        );
     }
 
     private parseUserId(rawId: string): number {

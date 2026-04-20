@@ -60,6 +60,11 @@ enum CoinTransactionType {
   DEBIT
 }
 
+enum HomeworkCoinTrack {
+  STANDARD
+  BOOTCAMP
+}
+
 model User {
   id              Int                      @id @default(autoincrement())
   fullName        String
@@ -278,17 +283,18 @@ model HomeworkResponse {
 }
 
 model HomeworkResult {
-  id         Int            @id @default(autoincrement())
-  homeworkId Int
-  studentId  Int
-  userId     Int?
-  teacherId  Int?
-  title      String
-  file       String?
-  score      Int
-  status     HomeworkStatus
-  created_at DateTime       @default(now())
-  updated_at DateTime       @updatedAt
+  id               Int            @id @default(autoincrement())
+  homeworkId       Int
+  studentId        Int
+  userId           Int?
+  teacherId        Int?
+  title            String
+  file             String?
+  score            Int
+  teacherCoinAward Int?
+  status           HomeworkStatus
+  created_at       DateTime       @default(now())
+  updated_at       DateTime       @updatedAt
 
   teacher  Teacher? @relation(fields: [teacherId], references: [id])
   user     User?    @relation(fields: [userId], references: [id])
@@ -322,4 +328,14 @@ model TeacherCoinTransaction {
 
   @@index([teacherId, created_at])
   @@index([createdBy])
+}
+
+model HomeworkCoinPolicy {
+  id          Int               @id @default(autoincrement())
+  track       HomeworkCoinTrack @unique
+  coin60To89  Int               @default(5)
+  coin90To100 Int               @default(7)
+  updatedBy   Int?
+  created_at  DateTime          @default(now())
+  updated_at  DateTime          @updatedAt
 }

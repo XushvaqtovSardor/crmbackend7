@@ -1,15 +1,20 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, } from '@nestjs/common';
-import { HomeworkStatus, HomeworkStatusStudent, Prisma, Role } from '@prisma/client';
+import { CoinTransactionType, HomeworkCoinTrack, HomeworkStatus, HomeworkStatusStudent, Prisma, Role } from '@prisma/client';
+import { NotificationService } from '../../common/notifications';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AssignHomeworkDto } from './dto/assign-homework.dto';
 import { CreateLessonDto } from './dto/create-lesson.dto';
 import { PublishVideoDto } from './dto/publish-video.dto';
 import { ReviewHomeworkDto } from './dto/review-homework.dto';
 import { SubmitHomeworkDto } from './dto/submit-homework.dto';
+import { UpdateHomeworkCoinPoliciesDto } from './dto/update-homework-coin-policies.dto';
 import { UpdateHomeworkPolicyDto } from './dto/update-homework-policy.dto';
 @Injectable()
 export class ErpService {
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly notificationService: NotificationService,
+    ) { }
     async createLesson(actorId: number, actorRole: Role, dto: CreateLessonDto) {
         const managedGroup = await this.ensureGroupExists(dto.groupId);
 
@@ -56,6 +61,10 @@ export class ErpService {
         }
         if (!this.isSuperAdmin(actorRole) && lesson.teacherId !== actorId) {
             throw new ForbiddenException('You can only upload videos for your own lessons');
+        }
+
+        if (!this.isValidVideoAttachment(dto.file)) {
+            throw new BadRequestException('Video uchun faqat video fayl yoki video link biriktirilishi mumkin');
         }
 
         const ownerTeacherId = this.isSuperAdmin(actorRole)
@@ -213,6 +222,7 @@ export class ErpService {
                     studentId: true,
                     score: true,
                     status: true,
+                    teacherCoinAward: true,
                     updated_at: true,
                 },
             }),
@@ -229,15 +239,42 @@ export class ErpService {
         }));
     }
     async reviewHomework(actorId: number, actorRole: Role, dto: ReviewHomeworkDto) {
-        let homeworkTeacherId: number | null = null;
+        const homework = await this.prisma.homework.findUnique({
+            where: { id: dto.homeworkId },
+            select: {
+                id: true,
+                title: true,
+                teacherId: true,
+                lesson: {
+                    select: {
+                        group: {
+                            select: {
+                                name: true,
+                                course: {
+                                    select: {
+                                        name: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
 
-        if (!this.isSuperAdmin(actorRole)) {
-            const ownedHomework = await this.ensureTeacherOwnsHomework(actorId, dto.homeworkId);
-            homeworkTeacherId = ownedHomework.teacherId ?? null;
-        } else {
-            const homework = await this.ensureHomeworkExists(dto.homeworkId);
-            homeworkTeacherId = homework.teacherId ?? null;
+        if (!homework) {
+            throw new NotFoundException(`Homework with ID ${dto.homeworkId} not found`);
         }
+
+        if (!this.isSuperAdmin(actorRole) && homework.teacherId !== actorId) {
+            throw new ForbiddenException('Teacher can only manage own homework tasks');
+        }
+
+        const homeworkTeacherId = homework.teacherId ?? null;
+        const coinTrack = this.resolveHomeworkCoinTrack(
+            homework.lesson?.group?.name,
+            homework.lesson?.group?.course?.name,
+        );
 
         const latestResponse = await this.prisma.homeworkResponse.findFirst({
             where: {
@@ -251,6 +288,7 @@ export class ErpService {
         if (!latestResponse) {
             throw new NotFoundException('No submission found to review for this student');
         }
+
         const existingResult = await this.prisma.homeworkResult.findFirst({
             where: {
                 homeworkId: dto.homeworkId,
@@ -259,36 +297,137 @@ export class ErpService {
             orderBy: {
                 updated_at: 'desc',
             },
+            select: {
+                id: true,
+                score: true,
+                status: true,
+                teacherCoinAward: true,
+            },
         });
-        const resultPayload = {
-            homeworkId: dto.homeworkId,
-            studentId: dto.studentId,
-            teacherId: this.isSuperAdmin(actorRole) ? homeworkTeacherId : actorId,
-            userId: this.isSuperAdmin(actorRole) ? actorId : undefined,
-            title: latestResponse.title,
-            file: latestResponse.file,
-            score: dto.score,
-            status: dto.status,
-        };
-        const [gradedResult, reviewedResponse] = await this.prisma.$transaction([
-            existingResult
-                ? this.prisma.homeworkResult.update({
+
+        const reviewOutcome = await this.prisma.$transaction(async (tx) => {
+            const coinPolicy = await this.getHomeworkCoinPolicyByTrack(tx, coinTrack);
+
+            const previousAward = existingResult
+                ? (existingResult.teacherCoinAward
+                    ?? this.resolveCoinAward(existingResult.score, existingResult.status, coinPolicy))
+                : 0;
+            const nextAward = this.resolveCoinAward(dto.score, dto.status, coinPolicy);
+            const coinDelta = nextAward - previousAward;
+
+            const resultPayload = {
+                homeworkId: dto.homeworkId,
+                studentId: dto.studentId,
+                teacherId: this.isSuperAdmin(actorRole) ? homeworkTeacherId : actorId,
+                userId: this.isSuperAdmin(actorRole) ? actorId : undefined,
+                title: latestResponse.title,
+                file: latestResponse.file,
+                score: dto.score,
+                status: dto.status,
+                teacherCoinAward: nextAward,
+            };
+
+            const gradedResult = existingResult
+                ? await tx.homeworkResult.update({
                     where: { id: existingResult.id },
                     data: resultPayload,
                 })
-                : this.prisma.homeworkResult.create({ data: resultPayload }),
-            this.prisma.homeworkResponse.update({
+                : await tx.homeworkResult.create({ data: resultPayload });
+
+            const reviewedResponse = await tx.homeworkResponse.update({
                 where: { id: latestResponse.id },
                 data: {
                     feedback: dto.feedback,
                     reviewedAt: new Date(),
                 },
-            }),
-        ]);
-        return {
-            gradedResult,
-            reviewedResponse,
+            });
+
+            let transaction: {
+                id: number;
+                type: CoinTransactionType;
+                amount: number;
+                balanceAfter: number;
+                reason: string | null;
+                created_at: Date;
+            } | null = null;
+
+            if (homeworkTeacherId && coinDelta !== 0) {
+                const teacher = await tx.teacher.findUnique({
+                    where: { id: homeworkTeacherId },
+                    select: {
+                        id: true,
+                        coinBalance: true,
+                    },
+                });
+
+                if (!teacher) {
+                    throw new NotFoundException(`Teacher with ID ${homeworkTeacherId} not found`);
+                }
+
+                const nextBalance = teacher.coinBalance + coinDelta;
+                if (nextBalance < 0) {
+                    throw new BadRequestException('Teacher coin balance cannot be negative after review update');
+                }
+
+                await tx.teacher.update({
+                    where: { id: homeworkTeacherId },
+                    data: {
+                        coinBalance: nextBalance,
+                    },
+                });
+
+                transaction = await tx.teacherCoinTransaction.create({
+                    data: {
+                        teacherId: homeworkTeacherId,
+                        type: coinDelta > 0 ? CoinTransactionType.CREDIT : CoinTransactionType.DEBIT,
+                        amount: Math.abs(coinDelta),
+                        balanceAfter: nextBalance,
+                        reason: `Homework review reward (${coinTrack}) • Homework #${dto.homeworkId} • Student #${dto.studentId} • Score ${dto.score}`,
+                        createdBy: actorId,
+                    },
+                    select: {
+                        id: true,
+                        type: true,
+                        amount: true,
+                        balanceAfter: true,
+                        reason: true,
+                        created_at: true,
+                    },
+                });
+            }
+
+            return {
+                gradedResult,
+                reviewedResponse,
+                coinTrack,
+                previousAward,
+                nextAward,
+                coinDelta,
+                transaction,
+            };
+        });
+
+        await this.sendHomeworkReviewStudentNotification({
+            studentId: dto.studentId,
+            homeworkTitle: homework.title || latestResponse.title || `Homework #${dto.homeworkId}`,
+            score: dto.score,
+            status: dto.status,
+            teacherCoinAward: reviewOutcome.nextAward,
+        });
+
+        const resultPayload = {
+            gradedResult: reviewOutcome.gradedResult,
+            reviewedResponse: reviewOutcome.reviewedResponse,
+            coin: {
+                track: reviewOutcome.coinTrack,
+                previousAward: reviewOutcome.previousAward,
+                awarded: reviewOutcome.nextAward,
+                delta: reviewOutcome.coinDelta,
+                transaction: reviewOutcome.transaction,
+            },
         };
+
+        return resultPayload;
     }
     async getTeacherDashboard(teacherId: number) {
         const [groupCount, lessonCount, homeworkCount, upcomingDeadlines, recentHomeworks, pendingReviews] = await Promise.all([
@@ -467,6 +606,7 @@ export class ErpService {
                     homeworkId: true,
                     score: true,
                     status: true,
+                    teacherCoinAward: true,
                     created_at: true,
                     updated_at: true,
                 },
@@ -475,6 +615,7 @@ export class ErpService {
         const latestGradeByHomework = new Map<number, {
             score: number;
             status: HomeworkStatus;
+            teacherCoinAward: number;
             created_at: Date;
             updated_at: Date;
         }>();
@@ -483,6 +624,7 @@ export class ErpService {
                 latestGradeByHomework.set(grade.homeworkId, {
                     score: grade.score,
                     status: grade.status,
+                    teacherCoinAward: grade.teacherCoinAward || 0,
                     created_at: grade.created_at,
                     updated_at: grade.updated_at,
                 });
@@ -500,6 +642,7 @@ export class ErpService {
                 reviewedAt: response.reviewedAt || null,
                 created_at: response.created_at,
                 score: grade?.score || 0,
+                teacherCoinAward: grade?.teacherCoinAward || 0,
             };
         });
         const gradeRows = grades.map((grade) => ({
@@ -508,6 +651,7 @@ export class ErpService {
             title: grade.title || `Homework #${grade.homeworkId}`,
             score: grade.score,
             status: grade.status,
+            teacherCoinAward: grade.teacherCoinAward || 0,
             created_at: grade.created_at,
             updated_at: grade.updated_at,
         }));
@@ -654,6 +798,183 @@ export class ErpService {
             finance,
         };
     }
+    async getHomeworkCoinPolicies() {
+        const policies = await this.ensureHomeworkCoinPolicies();
+        return this.mapHomeworkCoinPolicies(policies);
+    }
+    async updateHomeworkCoinPolicies(actorId: number, dto: UpdateHomeworkCoinPoliciesDto) {
+        if (dto.standard.coin90To100 < dto.standard.coin60To89) {
+            throw new BadRequestException('Standard siyosatda 90-100 coin qiymati 60-89 dan kichik bo\'lmasligi kerak');
+        }
+
+        if (dto.bootcamp.coin90To100 < dto.bootcamp.coin60To89) {
+            throw new BadRequestException('Bootcamp siyosatda 90-100 coin qiymati 60-89 dan kichik bo\'lmasligi kerak');
+        }
+
+        return this.prisma.$transaction(async (tx) => {
+            await this.ensureHomeworkCoinPolicies(tx);
+
+            await Promise.all([
+                tx.homeworkCoinPolicy.update({
+                    where: { track: HomeworkCoinTrack.STANDARD },
+                    data: {
+                        coin60To89: dto.standard.coin60To89,
+                        coin90To100: dto.standard.coin90To100,
+                        updatedBy: actorId,
+                    },
+                }),
+                tx.homeworkCoinPolicy.update({
+                    where: { track: HomeworkCoinTrack.BOOTCAMP },
+                    data: {
+                        coin60To89: dto.bootcamp.coin60To89,
+                        coin90To100: dto.bootcamp.coin90To100,
+                        updatedBy: actorId,
+                    },
+                }),
+            ]);
+
+            const updated = await tx.homeworkCoinPolicy.findMany();
+            return this.mapHomeworkCoinPolicies(updated);
+        });
+    }
+    private getDefaultHomeworkCoinPolicy(track: HomeworkCoinTrack) {
+        if (track === HomeworkCoinTrack.BOOTCAMP) {
+            return {
+                track,
+                coin60To89: 5,
+                coin90To100: 7,
+            };
+        }
+
+        return {
+            track,
+            coin60To89: 5,
+            coin90To100: 7,
+        };
+    }
+    private mapHomeworkCoinPolicies(rows: Array<{
+        track: HomeworkCoinTrack;
+        coin60To89: number;
+        coin90To100: number;
+    }>) {
+        const standard = rows.find((row) => row.track === HomeworkCoinTrack.STANDARD)
+            || this.getDefaultHomeworkCoinPolicy(HomeworkCoinTrack.STANDARD);
+        const bootcamp = rows.find((row) => row.track === HomeworkCoinTrack.BOOTCAMP)
+            || this.getDefaultHomeworkCoinPolicy(HomeworkCoinTrack.BOOTCAMP);
+
+        return {
+            standard: {
+                coin60To89: standard.coin60To89,
+                coin90To100: standard.coin90To100,
+            },
+            bootcamp: {
+                coin60To89: bootcamp.coin60To89,
+                coin90To100: bootcamp.coin90To100,
+            },
+        };
+    }
+    private async ensureHomeworkCoinPolicies(tx: PrismaService | Prisma.TransactionClient = this.prisma) {
+        const current = await tx.homeworkCoinPolicy.findMany();
+        const tracks = new Set(current.map((row) => row.track));
+        const createRows: Array<{
+            track: HomeworkCoinTrack;
+            coin60To89: number;
+            coin90To100: number;
+        }> = [];
+
+        if (!tracks.has(HomeworkCoinTrack.STANDARD)) {
+            createRows.push(this.getDefaultHomeworkCoinPolicy(HomeworkCoinTrack.STANDARD));
+        }
+        if (!tracks.has(HomeworkCoinTrack.BOOTCAMP)) {
+            createRows.push(this.getDefaultHomeworkCoinPolicy(HomeworkCoinTrack.BOOTCAMP));
+        }
+
+        if (createRows.length > 0) {
+            await tx.homeworkCoinPolicy.createMany({
+                data: createRows,
+            });
+        }
+
+        if (createRows.length === 0) {
+            return current;
+        }
+
+        return tx.homeworkCoinPolicy.findMany();
+    }
+    private async getHomeworkCoinPolicyByTrack(
+        tx: PrismaService | Prisma.TransactionClient,
+        track: HomeworkCoinTrack,
+    ) {
+        const policies = await this.ensureHomeworkCoinPolicies(tx);
+        return policies.find((item) => item.track === track)
+            || this.getDefaultHomeworkCoinPolicy(track);
+    }
+    private resolveHomeworkCoinTrack(groupName?: string | null, courseName?: string | null) {
+        const source = `${String(groupName || '')} ${String(courseName || '')}`.toLowerCase();
+        return source.includes('bootcamp')
+            ? HomeworkCoinTrack.BOOTCAMP
+            : HomeworkCoinTrack.STANDARD;
+    }
+    private resolveCoinAward(
+        score: number,
+        status: HomeworkStatus,
+        policy: {
+            coin60To89: number;
+            coin90To100: number;
+        },
+    ) {
+        if (status !== HomeworkStatus.APPROVED) {
+            return 0;
+        }
+
+        if (score >= 90 && score <= 100) {
+            return policy.coin90To100;
+        }
+
+        if (score >= 60 && score < 90) {
+            return policy.coin60To89;
+        }
+
+        return 0;
+    }
+    private async sendHomeworkReviewStudentNotification(payload: {
+        studentId: number;
+        homeworkTitle: string;
+        score: number;
+        status: HomeworkStatus;
+        teacherCoinAward: number;
+    }) {
+        const student = await this.prisma.student.findUnique({
+            where: { id: payload.studentId },
+            select: {
+                fullName: true,
+                email: true,
+                phone: true,
+            },
+        });
+
+        if (!student) {
+            return;
+        }
+
+        if (!student.email && !student.phone) {
+            return;
+        }
+
+        try {
+            await this.notificationService.sendHomeworkReviewNotice({
+                toEmail: student.email || undefined,
+                toPhone: student.phone || undefined,
+                fullName: student.fullName,
+                homeworkTitle: payload.homeworkTitle,
+                score: payload.score,
+                status: payload.status,
+                teacherCoinAward: payload.teacherCoinAward,
+            });
+        } catch {
+            // Non-blocking notification send.
+        }
+    }
     private async ensureTeacherOwnsLesson(teacherId: number, lessonId: number) {
         const lesson = await this.prisma.lesson.findUnique({
             where: { id: lessonId },
@@ -753,6 +1074,63 @@ export class ErpService {
     private isSuperAdmin(role: Role) {
         return role === Role.SUPERADMIN;
     }
+
+    private isValidVideoAttachment(value: string) {
+        const raw = String(value || '').trim();
+        if (!raw) return false;
+
+        const parsed = this.parseAttachment(raw);
+        const candidates = [parsed.link, parsed.fileName, raw]
+            .map((item) => String(item || '').trim())
+            .filter(Boolean);
+
+        return candidates.some((item) => this.isVideoSource(item));
+    }
+
+    private parseAttachment(value: string) {
+        const raw = String(value || '').trim();
+
+        if (!raw || !raw.startsWith('{')) {
+            return {
+                fileName: '',
+                link: '',
+            };
+        }
+
+        try {
+            const parsed = JSON.parse(raw) as {
+                type?: string;
+                fileName?: string;
+                link?: string;
+            };
+
+            if (parsed?.type !== 'attachment-v1') {
+                return {
+                    fileName: '',
+                    link: '',
+                };
+            }
+
+            return {
+                fileName: String(parsed.fileName || '').trim(),
+                link: String(parsed.link || '').trim(),
+            };
+        } catch {
+            return {
+                fileName: '',
+                link: '',
+            };
+        }
+    }
+
+    private isVideoSource(source: string) {
+        const normalized = String(source || '').trim().toLowerCase();
+        if (!normalized) return false;
+
+        const withoutQuery = normalized.split('?')[0];
+        return /(\.mp4|\.webm|\.mov|\.m4v|\.avi|\.mkv|\.ogg)$/.test(withoutQuery);
+    }
+
     private async ensureStudentExists(studentId: number) {
         const student = await this.prisma.student.findUnique({
             where: { id: studentId },

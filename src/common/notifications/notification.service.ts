@@ -16,6 +16,16 @@ type CredentialsPayload = {
     accountType: 'TEACHER' | 'STUDENT' | 'ADMIN' | 'MANAGEMENT' | 'ADMINSTRATOR';
 };
 
+type HomeworkReviewNoticePayload = {
+    toEmail?: string;
+    toPhone?: string;
+    fullName: string;
+    homeworkTitle: string;
+    score: number;
+    status: string;
+    teacherCoinAward?: number;
+};
+
 @Injectable()
 export class NotificationService {
     private readonly logger = new Logger(NotificationService.name);
@@ -88,6 +98,85 @@ export class NotificationService {
             this.sendCredentialsEmail(payload),
             this.sendCredentialsSms(payload),
         ]);
+    }
+
+    async sendHomeworkReviewNotice(payload: HomeworkReviewNoticePayload): Promise<void> {
+        const statusLabel = String(payload.status || '').toUpperCase() === 'APPROVED'
+            ? 'Qabul qilindi'
+            : String(payload.status || '').toUpperCase() === 'REJECTED'
+                ? 'Qaytarildi'
+                : 'Ko\'rib chiqilmoqda';
+
+        const coinLine = Number(payload.teacherCoinAward || 0) > 0
+            ? `Ushbu natija uchun ustozga +${payload.teacherCoinAward} coin hisoblandi.`
+            : 'Ushbu natija uchun coin berilmadi.';
+
+        const subject = 'Uyga vazifa natijasi yangilandi';
+        const text = [
+            `Salom, ${payload.fullName}!`,
+            '',
+            `Vazifa: ${payload.homeworkTitle}`,
+            `Holat: ${statusLabel}`,
+            `Baho: ${payload.score}`,
+            coinLine,
+        ].join('\n');
+
+        const toEmail = String(payload.toEmail || '').trim();
+        if (toEmail) {
+            await this.sendPlainEmail(toEmail, subject, text);
+        }
+
+        const toPhone = String(payload.toPhone || '').trim();
+        if (toPhone) {
+            const smsText = `Vazifa natijasi: ${payload.homeworkTitle}. Holat: ${statusLabel}. Baho: ${payload.score}. ${coinLine}`;
+            const sent = await this.sendSms(toPhone, smsText);
+
+            if (!sent) {
+                if (!this.isSmsProviderConfigured()) {
+                    this.logger.warn(
+                        `SMS provider is not configured (Twilio/Eskiz). Homework review SMS was skipped for ${toPhone}`,
+                    );
+                } else {
+                    this.logger.error(
+                        `Homework review SMS send failed for ${toPhone}. Check provider credentials and Eskiz approved template text.`,
+                    );
+                }
+            }
+        }
+    }
+
+    private async sendPlainEmail(toEmail: string, subject: string, text: string): Promise<boolean> {
+        const host = process.env.SMTP_HOST;
+        const port = Number(process.env.SMTP_PORT || '587');
+        const user = process.env.SMTP_USER;
+        const pass = process.env.SMTP_PASS;
+        const from = this.resolveSmtpFrom(user);
+
+        if (!host || !user || !pass || !from) {
+            this.logger.warn(`SMTP is not configured. Email was skipped for ${toEmail}`);
+            return false;
+        }
+
+        try {
+            const transporter = nodemailer.createTransport({
+                host,
+                port,
+                secure: port === 465,
+                auth: { user, pass },
+            });
+
+            await transporter.sendMail({
+                from,
+                to: toEmail,
+                subject,
+                text,
+            });
+
+            return true;
+        } catch (error) {
+            this.logger.error(`Failed to send email to ${toEmail}`, error as Error);
+            return false;
+        }
     }
 
     private async sendCredentialsEmail(payload: CredentialsPayload): Promise<void> {
